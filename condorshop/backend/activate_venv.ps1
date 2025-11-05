@@ -1,4 +1,5 @@
 # Script para activar el venv sin problemas de política de ejecución
+# Script para activar el .venv sin problemas de política de ejecución
 # Ejecuta: powershell -ExecutionPolicy Bypass -File .\activate_venv.ps1
 
 $ErrorActionPreference = "Stop"
