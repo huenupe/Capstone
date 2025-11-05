@@ -33,6 +33,20 @@ const Cart = () => {
     try {
       const data = await cartService.getCart()
       console.log('Cart data from backend:', data) // Debug
+      // Log para verificar datos de descuento
+      if (data.items) {
+        data.items.forEach((item, idx) => {
+          console.log(`Item ${idx}:`, {
+            product_name: item.product?.name,
+            unit_price: item.unit_price,
+            product_price: item.product?.price,
+            product_final_price: item.product?.final_price,
+            has_discount: item.product?.has_discount,
+            calculated_discount_percent: item.product?.calculated_discount_percent,
+            discount_percent: item.product?.discount_percent
+          })
+        })
+      }
       setCart(data)
       // Asegurar que los totales se actualicen después de cargar
       const { updateTotals } = useCartStore.getState()
@@ -155,9 +169,9 @@ const Cart = () => {
                     </Link>
                     <div className="mb-2">
                       <PriceTag
-                        price={item.unit_price}
-                        originalPrice={item.product?.price}
-                        discountPercent={item.product?.discount_percent}
+                        price={parseFloat(item.unit_price) || parseFloat(item.product?.final_price) || parseFloat(item.product?.price)}
+                        originalPrice={item.product?.has_discount ? parseFloat(item.product.price) : null}
+                        discountPercent={item.product?.has_discount ? (item.product.calculated_discount_percent || item.product.discount_percent) : null}
                         size="sm"
                       />
                     </div>

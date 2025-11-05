@@ -103,24 +103,36 @@ class Product(models.Model):
                 raise ValueError('El precio final del descuento no puede ser mayor que el precio original')
             if self.discount_price < 0:
                 raise ValueError('El precio final del descuento no puede ser negativo')
+            # Si es 0, se tratará como None (sin descuento)
         
         if self.discount_amount is not None:
             if self.discount_amount > price_int:
                 raise ValueError('El monto a descontar no puede ser mayor que el precio original')
             if self.discount_amount < 0:
                 raise ValueError('El monto a descontar no puede ser negativo')
+            # Si es 0, se tratará como None (sin descuento)
         
         if self.discount_percent is not None:
             if self.discount_percent < 1 or self.discount_percent > 100:
                 raise ValueError('El porcentaje de descuento debe estar entre 1 y 100')
         
         # Si hay múltiples métodos de descuento, priorizar: discount_price > discount_amount > discount_percent
-        # Si se configuró discount_price, limpiar los otros
-        if self.discount_price is not None:
+        # Si discount_price es 0, tratarlo como None (sin descuento)
+        if self.discount_price == 0:
+            self.discount_price = None
+        
+        # Si se configuró discount_price válido (> 0), limpiar los otros
+        if self.discount_price is not None and self.discount_price > 0:
             self.discount_amount = None
             self.discount_percent = None
-        # Si se configuró discount_amount, limpiar discount_percent
-        elif self.discount_amount is not None:
+        # Si se configuró discount_amount válido (> 0), limpiar discount_percent
+        elif self.discount_amount is not None and self.discount_amount > 0:
+            self.discount_percent = None
+        # Si discount_amount es 0, limpiarlo
+        elif self.discount_amount == 0:
+            self.discount_amount = None
+        # Si discount_percent es 0 o fuera de rango, limpiarlo
+        elif self.discount_percent is not None and (self.discount_percent < 1 or self.discount_percent > 100):
             self.discount_percent = None
         
         super().save(*args, **kwargs)
@@ -131,29 +143,31 @@ class Product(models.Model):
         Calcula el precio final según el método de descuento configurado.
         Prioridad: discount_price > discount_amount > discount_percent > price
         Siempre retorna un entero (peso chileno, sin decimales)
+        
+        IMPORTANTE: Si discount_price es 0, se trata como None (sin descuento)
         """
         price_int = int(self.price)
         
-        # Prioridad 1: Precio final directo
-        if self.discount_price is not None:
-            final = max(self.discount_price, 0)  # No permitir precios negativos
+        # Prioridad 1: Precio final directo (solo si es > 0 y válido)
+        if self.discount_price is not None and self.discount_price > 0:
+            final = self.discount_price
             if final > price_int:
                 # Si hay inconsistencia, normalizar al precio original
-                return price_int
+                return Decimal(str(price_int))
             return Decimal(str(final))
         
-        # Prioridad 2: Monto a descontar
-        if self.discount_amount is not None:
+        # Prioridad 2: Monto a descontar (solo si es > 0)
+        if self.discount_amount is not None and self.discount_amount > 0:
             final = price_int - self.discount_amount
             return Decimal(str(max(final, 0)))  # No permitir precios negativos
         
-        # Prioridad 3: Porcentaje de descuento
-        if self.discount_percent is not None:
+        # Prioridad 3: Porcentaje de descuento (solo si está entre 1-100)
+        if self.discount_percent is not None and 1 <= self.discount_percent <= 100:
             # Calcular: precio * (100 - porcentaje) / 100, redondeado a entero
             final = round(price_int * (100 - self.discount_percent) / 100)
             return Decimal(str(max(final, 0)))  # No permitir precios negativos
         
-        # Sin descuento: retornar precio original (entero)
+        # Sin descuento válido: retornar precio original (entero)
         return Decimal(str(price_int))
     
     @property

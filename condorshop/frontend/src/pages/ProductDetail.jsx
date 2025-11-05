@@ -106,7 +106,7 @@ const ProductDetail = () => {
               <PriceTag 
                 price={product.final_price || product.price} 
                 originalPrice={product.has_discount ? product.price : null}
-                discountPercent={product.discount_percent}
+                discountPercent={product.has_discount ? (product.calculated_discount_percent || product.discount_percent) : null}
                 size="lg"
                 className="mb-6" 
               />

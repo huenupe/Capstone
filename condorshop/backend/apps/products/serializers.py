@@ -55,12 +55,17 @@ class ProductListSerializer(serializers.ModelSerializer):
     main_image = serializers.SerializerMethodField()
     final_price = serializers.SerializerMethodField()
     discount_percent = serializers.SerializerMethodField()
+    calculated_discount_percent = serializers.SerializerMethodField()
     has_discount = serializers.ReadOnlyField()
 
     class Meta:
         model = Product
         fields = ('id', 'name', 'price', 'discount_price', 'final_price', 'discount_percent', 
-                  'has_discount', 'stock_qty', 'slug', 'main_image', 'category')
+                  'calculated_discount_percent', 'has_discount', 'stock_qty', 'slug', 'main_image', 'category')
+    
+    def get_calculated_discount_percent(self, obj):
+        """Retorna el porcentaje calculado como entero"""
+        return int(obj.calculated_discount_percent)
     
     def get_final_price(self, obj):
         """Retorna final_price como entero"""
@@ -90,13 +95,18 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, read_only=True)
     final_price = serializers.SerializerMethodField()
     discount_percent = serializers.SerializerMethodField()
+    calculated_discount_percent = serializers.SerializerMethodField()
     has_discount = serializers.ReadOnlyField()
 
     class Meta:
         model = Product
         fields = ('id', 'name', 'slug', 'description', 'price', 'discount_price', 
-                  'final_price', 'discount_percent', 'has_discount', 'stock_qty', 
+                  'final_price', 'discount_percent', 'calculated_discount_percent', 'has_discount', 'stock_qty', 
                   'brand', 'sku', 'category', 'images', 'created_at', 'updated_at')
+    
+    def get_calculated_discount_percent(self, obj):
+        """Retorna el porcentaje calculado como entero"""
+        return int(obj.calculated_discount_percent)
     
     def get_final_price(self, obj):
         """Retorna final_price como entero"""

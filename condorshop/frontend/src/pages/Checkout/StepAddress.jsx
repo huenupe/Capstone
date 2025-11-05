@@ -442,8 +442,8 @@ const StepAddress = () => {
                         <div className="mt-1">
                           <PriceTag
                             price={item.unit_price || 0}
-                            originalPrice={item.product?.price}
-                            discountPercent={item.product?.discount_percent}
+                            originalPrice={item.product?.has_discount ? item.product?.price : null}
+                            discountPercent={item.product?.has_discount ? (item.product?.calculated_discount_percent || item.product?.discount_percent) : null}
                             size="sm"
                           />
                         </div>

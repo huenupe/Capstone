@@ -94,8 +94,25 @@ def view_cart(request):
     """
     Ver carrito del usuario/sesión
     GET /api/cart/
+    Actualiza automáticamente los precios de los items si han cambiado (por descuentos)
     """
     cart, session_token = get_cart(request)
+    # Optimizar consultas con select_related para incluir productos y categorías
+    cart = Cart.objects.prefetch_related(
+        'items__product__category'
+    ).get(id=cart.id)
+    
+    # Actualizar precios de items si han cambiado (por ejemplo, si se aplicó un descuento)
+    with transaction.atomic():
+        for item in cart.items.all():
+            if item.product:
+                # Recalcular precio final del producto
+                new_unit_price = item.product.final_price
+                # Solo actualizar si el precio cambió (para evitar updates innecesarios)
+                if item.unit_price != new_unit_price:
+                    item.unit_price = new_unit_price
+                    item.save(update_fields=['unit_price'])
+    
     serializer = CartSerializer(cart)
     response = Response(serializer.data)
     

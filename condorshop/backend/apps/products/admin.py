@@ -78,6 +78,9 @@ class ProductAdminForm(forms.ModelForm):
                 raise ValidationError('Ingresa un número entero en pesos chilenos (CLP, sin decimales). Ej: 22990, no 22990.50')
             if price < 0:
                 raise ValidationError('El precio final del descuento no puede ser negativo.')
+            # Si es 0, convertir a None (sin descuento)
+            if price == 0:
+                return None
         return price
     
     def clean_discount_amount(self):
@@ -89,6 +92,9 @@ class ProductAdminForm(forms.ModelForm):
                 raise ValidationError('Ingresa un número entero en pesos chilenos (CLP, sin decimales). Ej: 3000, no 3000.50')
             if amount < 0:
                 raise ValidationError('El monto a descontar no puede ser negativo.')
+            # Si es 0, convertir a None (sin descuento)
+            if amount == 0:
+                return None
         return amount
     
     def clean(self):
