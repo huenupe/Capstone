@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django import forms
+from django.core.exceptions import ValidationError
 from .models import Category, Product, ProductImage
 
 
@@ -31,8 +33,90 @@ class ProductImageInline(admin.TabularInline):
     verbose_name_plural = 'Imágenes'
 
 
+class ProductAdminForm(forms.ModelForm):
+    """Form con validaciones estrictas para descuentos (enteros)"""
+    
+    class Meta:
+        model = Product
+        fields = '__all__'
+        widgets = {
+            'discount_price': forms.NumberInput(attrs={
+                'step': '1',
+                'min': '0',
+                'placeholder': 'Ej: 22990'
+            }),
+            'discount_amount': forms.NumberInput(attrs={
+                'step': '1',
+                'min': '0',
+                'placeholder': 'Ej: 3000'
+            }),
+            'discount_percent': forms.NumberInput(attrs={
+                'step': '1',
+                'min': '1',
+                'max': '100',
+                'placeholder': 'Ej: 20 (para 20%)'
+            }),
+        }
+    
+    def clean_discount_percent(self):
+        """Validar que discount_percent sea entero entre 1-100"""
+        percent = self.cleaned_data.get('discount_percent')
+        if percent is not None:
+            # Verificar que sea entero
+            if not isinstance(percent, int) and (isinstance(percent, float) and not percent.is_integer()):
+                raise ValidationError('Ingresa un número entero entre 1 y 100. No se aceptan decimales (ej: 20, no 0.2 o 20.5).')
+            if percent < 1 or percent > 100:
+                raise ValidationError('El porcentaje de descuento debe estar entre 1 y 100.')
+        return percent
+    
+    def clean_discount_price(self):
+        """Validar que discount_price sea entero"""
+        price = self.cleaned_data.get('discount_price')
+        if price is not None:
+            # Verificar que sea entero
+            if not isinstance(price, int) and (isinstance(price, float) and not price.is_integer()):
+                raise ValidationError('Ingresa un número entero en pesos chilenos (CLP, sin decimales). Ej: 22990, no 22990.50')
+            if price < 0:
+                raise ValidationError('El precio final del descuento no puede ser negativo.')
+        return price
+    
+    def clean_discount_amount(self):
+        """Validar que discount_amount sea entero"""
+        amount = self.cleaned_data.get('discount_amount')
+        if amount is not None:
+            # Verificar que sea entero
+            if not isinstance(amount, int) and (isinstance(amount, float) and not amount.is_integer()):
+                raise ValidationError('Ingresa un número entero en pesos chilenos (CLP, sin decimales). Ej: 3000, no 3000.50')
+            if amount < 0:
+                raise ValidationError('El monto a descontar no puede ser negativo.')
+        return amount
+    
+    def clean(self):
+        """Validaciones cruzadas"""
+        cleaned_data = super().clean()
+        price = cleaned_data.get('price')
+        discount_price = cleaned_data.get('discount_price')
+        discount_amount = cleaned_data.get('discount_amount')
+        
+        if price:
+            price_int = int(price)
+            
+            if discount_price is not None and discount_price > price_int:
+                raise ValidationError({
+                    'discount_price': 'El precio final del descuento no puede ser mayor que el precio original.'
+                })
+            
+            if discount_amount is not None and discount_amount > price_int:
+                raise ValidationError({
+                    'discount_amount': 'El monto a descontar no puede ser mayor que el precio original.'
+                })
+        
+        return cleaned_data
+
+
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
+    form = ProductAdminForm
     list_display = ('name', 'sku', 'category', 'price', 'stock_qty', 'active', 'created_at')
     list_filter = ('category', 'active', 'created_at')
     search_fields = ('name', 'sku', 'description')
@@ -48,12 +132,12 @@ class ProductAdmin(admin.ModelAdmin):
         }),
         ('Descuentos', {
             'fields': ('discount_price', 'discount_amount', 'discount_percent'),
-            'description': 'Puedes usar uno de los tres métodos de descuento. Si configuras "Precio final del descuento", los otros se desactivarán automáticamente. Si configuras "Monto a descontar", el porcentaje se desactivará.'
+            'description': 'Puedes usar uno de los tres métodos de descuento. Precedencia: Precio final > Monto > Porcentaje. Si configuras "Precio final del descuento", los otros se desactivarán automáticamente. Todos los valores deben ser enteros (CLP sin decimales para montos/precios, 1-100 para porcentaje).'
         }),
         ('Información Calculada', {
             'fields': ('final_price', 'calculated_discount_percent', 'has_discount'),
             'classes': ('collapse',),
-            'description': 'Estos valores se calculan automáticamente basados en los descuentos configurados.'
+            'description': 'Estos valores se calculan automáticamente basados en los descuentos configurados. Todos los precios se muestran como enteros en pesos chilenos (CLP).'
         }),
         ('Fechas', {
             'fields': ('created_at', 'updated_at'),
@@ -111,9 +195,9 @@ class ProductAdmin(admin.ModelAdmin):
     final_price.short_description = 'Precio Final'
     
     def calculated_discount_percent(self, obj):
-        """Muestra el porcentaje de descuento calculado"""
+        """Muestra el porcentaje de descuento calculado (entero)"""
         percent = obj.calculated_discount_percent
-        return f"{percent:.2f}%" if percent > 0 else "0%"
+        return f"{int(percent)}%" if percent > 0 else "0%"
     calculated_discount_percent.short_description = 'Descuento Calculado'
     
     def has_discount(self, obj):

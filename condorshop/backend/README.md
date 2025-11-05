@@ -127,6 +127,14 @@ backend/
 └── media/              # Archivos multimedia
 ```
 
+### Productos / Descuentos
+
+**Descuentos:**
+- `discount_percent`: entero 1-100
+- `discount_amount` y `discount_price`: enteros (CLP)
+- Precedencia de cálculo: `final_price` > `amount` > `percent`
+- Todos los precios se manejan como enteros en pesos (sin decimales)
+
 ## 📡 Endpoints de la API
 
 ### Autenticación (`/api/auth/`)

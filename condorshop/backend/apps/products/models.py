@@ -44,34 +44,28 @@ class Product(models.Model):
     slug = models.SlugField(max_length=200, unique=True, db_column='slug', verbose_name='URL amigable')
     description = models.TextField(null=True, blank=True, db_column='description', verbose_name='Descripción')
     price = models.DecimalField(max_digits=10, decimal_places=2, db_column='price', verbose_name='Precio')
-    discount_price = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+    discount_price = models.IntegerField(
         null=True,
         blank=True,
         db_column='discount_price',
-        validators=[MinValueValidator(Decimal('0.00'))],
-        help_text='Precio final después del descuento. Si está configurado, se usa este precio directamente.',
+        validators=[MinValueValidator(0)],
+        help_text='Precio final después del descuento en pesos chilenos (CLP, sin decimales). Si está configurado, se usa este precio directamente. Ejemplo: 22990',
         verbose_name='Precio final del descuento'
     )
-    discount_amount = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+    discount_amount = models.IntegerField(
         null=True,
         blank=True,
         db_column='discount_amount',
-        validators=[MinValueValidator(Decimal('0.00'))],
-        help_text='Monto fijo a descontar del precio. Ejemplo: si el precio es $100 y aquí pones $20, el precio final será $80.',
+        validators=[MinValueValidator(0)],
+        help_text='Monto fijo a descontar del precio en pesos chilenos (CLP, sin decimales). Ejemplo: si el precio es $100000 y aquí pones $20000, el precio final será $80000.',
         verbose_name='Monto a descontar'
     )
-    discount_percent = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
+    discount_percent = models.PositiveSmallIntegerField(
         null=True,
         blank=True,
         db_column='discount_percent',
-        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
-        help_text='Porcentaje de descuento. Ingresa solo el número (ej: 20 para 20%, 25.5 para 25.5%).',
+        validators=[MinValueValidator(1), MaxValueValidator(100)],
+        help_text='Porcentaje de descuento. Ingresa solo un número entero entre 1 y 100 (ej: 20 para 20%, 25 para 25%). No se aceptan decimales.',
         verbose_name='Descuento por porcentaje (%)'
     )
     stock_qty = models.PositiveIntegerField(default=0, db_column='stock_qty', verbose_name='Cantidad en stock')
@@ -100,23 +94,33 @@ class Product(models.Model):
         if not self.slug:
             self.slug = slugify(self.name)
         
+        # Convertir price a entero para comparaciones
+        price_int = int(self.price)
+        
         # Validaciones de descuentos
-        if self.discount_price and self.discount_price > self.price:
-            raise ValueError('El precio final del descuento no puede ser mayor que el precio original')
+        if self.discount_price is not None:
+            if self.discount_price > price_int:
+                raise ValueError('El precio final del descuento no puede ser mayor que el precio original')
+            if self.discount_price < 0:
+                raise ValueError('El precio final del descuento no puede ser negativo')
         
-        if self.discount_amount and self.discount_amount > self.price:
-            raise ValueError('El monto a descontar no puede ser mayor que el precio original')
+        if self.discount_amount is not None:
+            if self.discount_amount > price_int:
+                raise ValueError('El monto a descontar no puede ser mayor que el precio original')
+            if self.discount_amount < 0:
+                raise ValueError('El monto a descontar no puede ser negativo')
         
-        if self.discount_percent and (self.discount_percent < 0 or self.discount_percent > 100):
-            raise ValueError('El porcentaje de descuento debe estar entre 0 y 100')
+        if self.discount_percent is not None:
+            if self.discount_percent < 1 or self.discount_percent > 100:
+                raise ValueError('El porcentaje de descuento debe estar entre 1 y 100')
         
         # Si hay múltiples métodos de descuento, priorizar: discount_price > discount_amount > discount_percent
         # Si se configuró discount_price, limpiar los otros
-        if self.discount_price:
+        if self.discount_price is not None:
             self.discount_amount = None
             self.discount_percent = None
         # Si se configuró discount_amount, limpiar discount_percent
-        elif self.discount_amount:
+        elif self.discount_amount is not None:
             self.discount_percent = None
         
         super().save(*args, **kwargs)
@@ -126,36 +130,52 @@ class Product(models.Model):
         """
         Calcula el precio final según el método de descuento configurado.
         Prioridad: discount_price > discount_amount > discount_percent > price
+        Siempre retorna un entero (peso chileno, sin decimales)
         """
-        if self.discount_price:
-            return self.discount_price
+        price_int = int(self.price)
         
-        if self.discount_amount:
-            final = self.price - self.discount_amount
-            return max(final, Decimal('0.00'))  # No permitir precios negativos
+        # Prioridad 1: Precio final directo
+        if self.discount_price is not None:
+            final = max(self.discount_price, 0)  # No permitir precios negativos
+            if final > price_int:
+                # Si hay inconsistencia, normalizar al precio original
+                return price_int
+            return Decimal(str(final))
         
-        if self.discount_percent:
-            discount = (self.price * self.discount_percent) / Decimal('100.00')
-            final = self.price - discount
-            return max(final, Decimal('0.00'))  # No permitir precios negativos
+        # Prioridad 2: Monto a descontar
+        if self.discount_amount is not None:
+            final = price_int - self.discount_amount
+            return Decimal(str(max(final, 0)))  # No permitir precios negativos
         
-        return self.price
+        # Prioridad 3: Porcentaje de descuento
+        if self.discount_percent is not None:
+            # Calcular: precio * (100 - porcentaje) / 100, redondeado a entero
+            final = round(price_int * (100 - self.discount_percent) / 100)
+            return Decimal(str(max(final, 0)))  # No permitir precios negativos
+        
+        # Sin descuento: retornar precio original (entero)
+        return Decimal(str(price_int))
     
     @property
     def calculated_discount_percent(self):
         """
-        Porcentaje de descuento calculado automáticamente basado en el precio final
+        Porcentaje de descuento calculado automáticamente basado en el precio final.
+        Retorna un entero (1-100)
         """
-        if self.price > 0:
-            discount = self.price - self.final_price
-            if discount > 0:
-                return round((discount / self.price) * 100, 2)
-        return Decimal('0.00')
+        price_int = int(self.price)
+        final_int = int(self.final_price)
+        
+        if price_int > 0 and final_int < price_int:
+            discount = price_int - final_int
+            percent = round((discount / price_int) * 100)
+            return max(1, min(100, percent))  # Asegurar entre 1 y 100
+        
+        return 0
     
     @property
     def has_discount(self):
         """Indica si el producto tiene descuento"""
-        return self.final_price < self.price
+        return int(self.final_price) < int(self.price)
 
 
 class ProductImage(models.Model):
