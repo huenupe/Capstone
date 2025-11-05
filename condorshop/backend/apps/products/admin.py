@@ -39,6 +39,30 @@ class ProductAdmin(admin.ModelAdmin):
     prepopulated_fields = {'slug': ('name',)}
     inlines = [ProductImageInline]
     
+    fieldsets = (
+        ('Información Básica', {
+            'fields': ('name', 'slug', 'category', 'description', 'brand', 'sku', 'active')
+        }),
+        ('Precio y Stock', {
+            'fields': ('price', 'stock_qty')
+        }),
+        ('Descuentos', {
+            'fields': ('discount_price', 'discount_amount', 'discount_percent'),
+            'description': 'Puedes usar uno de los tres métodos de descuento. Si configuras "Precio final del descuento", los otros se desactivarán automáticamente. Si configuras "Monto a descontar", el porcentaje se desactivará.'
+        }),
+        ('Información Calculada', {
+            'fields': ('final_price', 'calculated_discount_percent', 'has_discount'),
+            'classes': ('collapse',),
+            'description': 'Estos valores se calculan automáticamente basados en los descuentos configurados.'
+        }),
+        ('Fechas', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    readonly_fields = ('final_price', 'calculated_discount_percent', 'has_discount', 'created_at', 'updated_at')
+    
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.select_related('category')
@@ -79,4 +103,22 @@ class ProductAdmin(admin.ModelAdmin):
         return obj.created_at.strftime('%d de %B de %Y a las %H:%M') if obj.created_at else '-'
     created_at.short_description = 'Creado el'
     created_at.admin_order_field = 'created_at'
+    
+    # Métodos para campos calculados en readonly_fields
+    def final_price(self, obj):
+        """Muestra el precio final calculado"""
+        return f"${obj.final_price:,.0f}".replace(',', '.')
+    final_price.short_description = 'Precio Final'
+    
+    def calculated_discount_percent(self, obj):
+        """Muestra el porcentaje de descuento calculado"""
+        percent = obj.calculated_discount_percent
+        return f"{percent:.2f}%" if percent > 0 else "0%"
+    calculated_discount_percent.short_description = 'Descuento Calculado'
+    
+    def has_discount(self, obj):
+        """Indica si tiene descuento"""
+        return obj.has_discount
+    has_discount.boolean = True
+    has_discount.short_description = 'Tiene Descuento'
 

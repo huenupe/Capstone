@@ -1,6 +1,6 @@
 from django.db import models
 from django.utils.text import slugify
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, MaxValueValidator
 from decimal import Decimal
 
 
@@ -51,8 +51,28 @@ class Product(models.Model):
         blank=True,
         db_column='discount_price',
         validators=[MinValueValidator(Decimal('0.00'))],
-        help_text='Precio con descuento. Si está configurado, se usa en lugar de price.',
-        verbose_name='Precio de descuento'
+        help_text='Precio final después del descuento. Si está configurado, se usa este precio directamente.',
+        verbose_name='Precio final del descuento'
+    )
+    discount_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        db_column='discount_amount',
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text='Monto fijo a descontar del precio. Ejemplo: si el precio es $100 y aquí pones $20, el precio final será $80.',
+        verbose_name='Monto a descontar'
+    )
+    discount_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        db_column='discount_percent',
+        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
+        help_text='Porcentaje de descuento. Ingresa solo el número (ej: 20 para 20%, 25.5 para 25.5%).',
+        verbose_name='Descuento por porcentaje (%)'
     )
     stock_qty = models.PositiveIntegerField(default=0, db_column='stock_qty', verbose_name='Cantidad en stock')
     brand = models.CharField(max_length=100, null=True, blank=True, db_column='brand', verbose_name='Marca')
@@ -79,28 +99,63 @@ class Product(models.Model):
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = slugify(self.name)
-        # Validar que discount_price no sea mayor que price
+        
+        # Validaciones de descuentos
         if self.discount_price and self.discount_price > self.price:
-            raise ValueError('El precio de descuento no puede ser mayor que el precio original')
+            raise ValueError('El precio final del descuento no puede ser mayor que el precio original')
+        
+        if self.discount_amount and self.discount_amount > self.price:
+            raise ValueError('El monto a descontar no puede ser mayor que el precio original')
+        
+        if self.discount_percent and (self.discount_percent < 0 or self.discount_percent > 100):
+            raise ValueError('El porcentaje de descuento debe estar entre 0 y 100')
+        
+        # Si hay múltiples métodos de descuento, priorizar: discount_price > discount_amount > discount_percent
+        # Si se configuró discount_price, limpiar los otros
+        if self.discount_price:
+            self.discount_amount = None
+            self.discount_percent = None
+        # Si se configuró discount_amount, limpiar discount_percent
+        elif self.discount_amount:
+            self.discount_percent = None
+        
         super().save(*args, **kwargs)
     
     @property
     def final_price(self):
-        """Precio final: discount_price si existe, sino price"""
-        return self.discount_price if self.discount_price else self.price
+        """
+        Calcula el precio final según el método de descuento configurado.
+        Prioridad: discount_price > discount_amount > discount_percent > price
+        """
+        if self.discount_price:
+            return self.discount_price
+        
+        if self.discount_amount:
+            final = self.price - self.discount_amount
+            return max(final, Decimal('0.00'))  # No permitir precios negativos
+        
+        if self.discount_percent:
+            discount = (self.price * self.discount_percent) / Decimal('100.00')
+            final = self.price - discount
+            return max(final, Decimal('0.00'))  # No permitir precios negativos
+        
+        return self.price
     
     @property
-    def discount_percent(self):
-        """Porcentaje de descuento calculado automáticamente"""
-        if self.discount_price and self.price > 0:
-            discount = self.price - self.discount_price
-            return round((discount / self.price) * 100, 2)
+    def calculated_discount_percent(self):
+        """
+        Porcentaje de descuento calculado automáticamente basado en el precio final
+        """
+        if self.price > 0:
+            discount = self.price - self.final_price
+            if discount > 0:
+                return round((discount / self.price) * 100, 2)
         return Decimal('0.00')
     
     @property
     def has_discount(self):
         """Indica si el producto tiene descuento"""
-        return bool(self.discount_price and self.discount_price < self.price)
+        return self.final_price < self.price
 
 
 class ProductImage(models.Model):
