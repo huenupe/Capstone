@@ -40,7 +40,12 @@ const ProductCard = ({ product }) => {
         <p className="text-sm text-gray-600 mb-3 line-clamp-2">
           {product.description}
         </p>
-        <PriceTag price={product.price} />
+        <PriceTag 
+          price={product.final_price || product.price} 
+          originalPrice={product.has_discount ? product.price : null}
+          discountPercent={product.discount_percent}
+          size="md"
+        />
         {product.category && (
           <span className="inline-block mt-2 text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
             {product.category.name}

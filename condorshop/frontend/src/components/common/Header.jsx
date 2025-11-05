@@ -9,8 +9,20 @@ const Header = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams] = useSearchParams()
-  const { isAuthenticated, role, logout } = useAuthStore()
-  const itemCount = useCartStore((state) => state.getItemCount())
+  
+  // Acceso seguro a stores con defaults - usar selector seguro
+  const isAuthenticated = useAuthStore((state) => state?.isAuthenticated ?? false)
+  const role = useAuthStore((state) => state?.role ?? null)
+  const logout = useAuthStore((state) => state?.logout ?? (() => {}))
+  
+  const itemCount = useCartStore((state) => {
+    try {
+      return typeof state?.getItemCount === 'function' ? state.getItemCount() : 0
+    } catch {
+      return 0
+    }
+  })
+  
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || '')
 
   // Update search query when URL changes

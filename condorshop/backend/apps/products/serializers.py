@@ -53,10 +53,14 @@ class ProductListSerializer(serializers.ModelSerializer):
     """Serializer para listado de productos (campos básicos)"""
     category = CategorySerializer(read_only=True)
     main_image = serializers.SerializerMethodField()
+    final_price = serializers.ReadOnlyField()
+    discount_percent = serializers.ReadOnlyField()
+    has_discount = serializers.ReadOnlyField()
 
     class Meta:
         model = Product
-        fields = ('id', 'name', 'price', 'stock_qty', 'slug', 'main_image', 'category')
+        fields = ('id', 'name', 'price', 'discount_price', 'final_price', 'discount_percent', 
+                  'has_discount', 'stock_qty', 'slug', 'main_image', 'category')
 
     def get_main_image(self, obj):
         """Retorna la primera imagen ordenada por position con URL absoluta"""
@@ -76,22 +80,30 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     """Serializer para detalle de producto con imágenes ordenadas"""
     category = CategorySerializer(read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
+    final_price = serializers.ReadOnlyField()
+    discount_percent = serializers.ReadOnlyField()
+    has_discount = serializers.ReadOnlyField()
 
     class Meta:
         model = Product
-        fields = ('id', 'name', 'slug', 'description', 'price', 'stock_qty', 
+        fields = ('id', 'name', 'slug', 'description', 'price', 'discount_price', 
+                  'final_price', 'discount_percent', 'has_discount', 'stock_qty', 
                   'brand', 'sku', 'category', 'images', 'created_at', 'updated_at')
 
 
 class ProductAdminSerializer(serializers.ModelSerializer):
     """Serializer para CRUD de productos en admin"""
     category_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    final_price = serializers.ReadOnlyField()
+    discount_percent = serializers.ReadOnlyField()
+    has_discount = serializers.ReadOnlyField()
 
     class Meta:
         model = Product
-        fields = ('id', 'name', 'slug', 'description', 'price', 'stock_qty', 
+        fields = ('id', 'name', 'slug', 'description', 'price', 'discount_price', 
+                  'final_price', 'discount_percent', 'has_discount', 'stock_qty', 
                   'brand', 'sku', 'active', 'category', 'category_id', 'created_at', 'updated_at')
-        read_only_fields = ('created_at', 'updated_at')
+        read_only_fields = ('created_at', 'updated_at', 'final_price', 'discount_percent', 'has_discount')
 
     def validate(self, attrs):
         if 'category_id' in attrs:

@@ -103,7 +103,13 @@ const ProductDetail = () => {
                 </span>
               )}
 
-              <PriceTag price={product.price} className="mb-6" />
+              <PriceTag 
+                price={product.final_price || product.price} 
+                originalPrice={product.has_discount ? product.price : null}
+                discountPercent={product.discount_percent}
+                size="lg"
+                className="mb-6" 
+              />
 
               {product.description && (
                 <div className="mb-6">

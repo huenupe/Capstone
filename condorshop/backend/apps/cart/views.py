@@ -54,11 +54,14 @@ def add_to_cart(request):
 
     cart, session_token = get_cart(request)
 
+    # Usar final_price (precio con descuento si existe)
+    unit_price = product.final_price
+    
     # Verificar si el producto ya está en el carrito
     cart_item, created = CartItem.objects.get_or_create(
         cart=cart,
         product=product,
-        defaults={'quantity': quantity, 'unit_price': product.price}
+        defaults={'quantity': quantity, 'unit_price': unit_price}
     )
 
     if not created:
@@ -70,7 +73,7 @@ def add_to_cart(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         cart_item.quantity = new_quantity
-        cart_item.unit_price = product.price  # Actualizar precio por si cambió
+        cart_item.unit_price = unit_price  # Actualizar precio (puede haber cambiado por descuento)
         cart_item.save()
 
     response = Response(

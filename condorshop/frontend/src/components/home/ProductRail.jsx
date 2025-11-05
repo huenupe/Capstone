@@ -67,6 +67,7 @@ const ProductRail = ({ title, params = {} }) => {
   }
 
   if (products.length === 0) {
+    // No mostrar nada si no hay productos (no es error)
     return null
   }
 

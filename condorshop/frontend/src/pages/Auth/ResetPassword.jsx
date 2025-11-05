@@ -4,7 +4,8 @@ import { useForm } from 'react-hook-form'
 import Button from '../../components/common/Button'
 import TextField from '../../components/forms/TextField'
 import Spinner from '../../components/common/Spinner'
-import { validatePassword } from '../../utils/validations'
+import { validatePassword, validatePasswordMatch } from '../../utils/validations'
+import { authService } from '../../services/auth'
 
 const ResetPassword = () => {
   const navigate = useNavigate()
@@ -31,11 +32,10 @@ const ResetPassword = () => {
   const onSubmit = async (data) => {
     setLoading(true)
     try {
-      // TODO: Implementar llamada al backend cuando esté listo
-      // await authService.resetPassword({ token, password: data.password })
-      
-      // Simular delay para UX
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await authService.confirmPasswordReset({
+        token,
+        new_password: data.password,
+      })
       
       setSuccess(true)
       
@@ -45,6 +45,7 @@ const ResetPassword = () => {
       }, 2000)
     } catch (error) {
       console.error('Error resetting password:', error)
+      // El error se mostrará en el formulario si es de validación
     } finally {
       setLoading(false)
     }
@@ -54,19 +55,16 @@ const ResetPassword = () => {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-md w-full space-y-8">
-          <div className="bg-white shadow-md rounded-lg px-8 pt-6 pb-8 text-center">
-            <div className="mb-6">
-              <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          <div className="bg-white shadow-md rounded-lg px-8 pt-6 pb-8">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+              <div className="flex items-start">
+                <svg className="w-5 h-5 text-green-600 mt-0.5 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                 </svg>
+                <p className="text-sm text-green-800">
+                  Tu contraseña ha sido actualizada exitosamente. Redirigiendo al login...
+                </p>
               </div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                Contraseña Actualizada
-              </h2>
-              <p className="text-gray-600">
-                Tu contraseña ha sido actualizada exitosamente. Redirigiendo al login...
-              </p>
             </div>
           </div>
         </div>
@@ -109,8 +107,7 @@ const ResetPassword = () => {
               register={register}
               validation={{
                 required: 'Confirma tu contraseña',
-                validate: (value) =>
-                  value === password || 'Las contraseñas no coinciden',
+                validate: validatePasswordMatch(password),
               }}
               error={errors.confirmPassword?.message}
               placeholder="Confirma tu nueva contraseña"

@@ -28,19 +28,21 @@ python manage.py runserver
 1. **Crear un entorno virtual:**
 ```bash
 cd backend
-python -m venv venv
+python -m venv .venv
 ```
 
 2. **Instalar dependencias:**
 ```bash
 # En Windows (PowerShell):
-.\venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
 # O en Linux/Mac:
-source venv/bin/activate
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+**Nota:** El proyecto usa `.venv` como entorno virtual oficial. El repositorio ignora y no versiona ningún entorno virtual.
 
 3. **Configurar variables de entorno:**
 ```bash

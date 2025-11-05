@@ -91,6 +91,22 @@ const AppRoutes = () => {
           </RoleRoute>
         }
       />
+
+      {/* Catch-all route - debe ser la última */}
+      <Route
+        path="*"
+        element={
+          <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-gray-900 mb-4">404 - Página no encontrada</h1>
+              <p className="text-gray-600 mb-4">La página que buscas no existe.</p>
+              <a href="/" className="text-primary-600 hover:text-primary-700 underline">
+                Volver al inicio
+              </a>
+            </div>
+          </div>
+        }
+      />
     </Routes>
   )
 }

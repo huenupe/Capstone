@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     # Checkout endpoints
     path('mode', views.checkout_mode, name='checkout_mode'),
+    path('shipping-quote', views.shipping_quote, name='shipping_quote'),
     path('create', views.create_order, name='create_order'),
     # Order history endpoints (for authenticated users)
     path('', views.list_user_orders, name='list_user_orders'),

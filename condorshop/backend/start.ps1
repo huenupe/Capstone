@@ -6,7 +6,7 @@ Set-Location $PSScriptRoot
 Write-Host "Starting CondorShop Backend..." -ForegroundColor Green
 
 # Activate virtual environment and run server
-& ".\venv\Scripts\python.exe" manage.py runserver
+& ".\.venv\Scripts\python.exe" manage.py runserver
 
 
 

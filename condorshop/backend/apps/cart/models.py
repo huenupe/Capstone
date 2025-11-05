@@ -27,6 +27,8 @@ class Cart(models.Model):
 
     class Meta:
         db_table = 'carts'
+        verbose_name = 'Carrito'
+        verbose_name_plural = 'Carritos'
         indexes = [
             models.Index(fields=['user'], name='idx_cart_user'),
             models.Index(fields=['session_token'], name='idx_cart_session'),
@@ -34,8 +36,8 @@ class Cart(models.Model):
 
     def __str__(self):
         if self.user:
-            return f"Cart {self.id} - User: {self.user.email}"
-        return f"Cart {self.id} - Session: {self.session_token}"
+            return f"Carrito {self.id} - Usuario: {self.user.email}"
+        return f"Carrito {self.id} - Sesión: {self.session_token}"
 
     @classmethod
     def get_or_create_cart(cls, user=None, session_token=None):
@@ -85,6 +87,8 @@ class CartItem(models.Model):
 
     class Meta:
         db_table = 'cart_items'
+        verbose_name = 'Item de Carrito'
+        verbose_name_plural = 'Items de Carrito'
         unique_together = [['cart', 'product']]
         constraints = [
             models.CheckConstraint(

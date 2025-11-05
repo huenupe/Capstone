@@ -57,6 +57,8 @@ apiClient.interceptors.response.use(
       }
     }
     
+    // Mantener todos los errores visibles para debugging
+    // Los errores son útiles para identificar problemas y arreglarlos más adelante
     return Promise.reject(error)
   }
 )

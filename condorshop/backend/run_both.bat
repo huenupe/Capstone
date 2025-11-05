@@ -7,7 +7,7 @@ echo ========================================
 echo.
 echo Running migrations...
 echo.
-venv\Scripts\python.exe manage.py migrate
+.venv\Scripts\python.exe manage.py migrate
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo ========================================
@@ -36,6 +36,6 @@ echo Starting Django server...
 echo Server will be available at: http://127.0.0.1:8000/
 echo Press Ctrl+C to stop the server
 echo.
-venv\Scripts\python.exe manage.py runserver
+.venv\Scripts\python.exe manage.py runserver
 pause
 

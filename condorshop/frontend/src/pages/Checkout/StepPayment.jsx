@@ -28,6 +28,7 @@ const StepPayment = () => {
     }
   }, [navigate, isAuthenticated])
 
+  // Flag para habilitar Webpay - manejo seguro de variable de entorno
   const webpayEnabled = import.meta.env.VITE_WEBPAY_ENABLED === 'true'
   const canProceed = webpayEnabled && canPay
 
@@ -112,10 +113,9 @@ const StepPayment = () => {
                     <div className="ml-4 flex-1">
                       <div className="flex items-center justify-between">
                         <h3 className="text-lg font-semibold text-gray-900">Otros</h3>
-                        <span className="text-xs text-gray-500">(Próximamente)</span>
                       </div>
                       <p className="text-sm text-gray-600 mt-2">
-                        Otros métodos de pago estarán disponibles próximamente.
+                        Otros métodos de pago estarán disponibles en el futuro.
                       </p>
                     </div>
                   </div>
@@ -125,24 +125,17 @@ const StepPayment = () => {
               <div className="mt-6 pt-6 border-t">
                 <Button
                   onClick={() => {
-                    // TODO: Implementar lógica de pago cuando esté habilitado
                     if (canProceed) {
-                      // Procesar pago
                       navigate('/checkout/review')
                     }
                   }}
                   fullWidth
                   size="lg"
                   disabled={!canProceed}
-                  title={!canProceed ? 'Próximamente' : ''}
+                  title={!canProceed ? 'Webpay no está habilitado aún' : ''}
                 >
                   Continuar
                 </Button>
-                {!canProceed && (
-                  <p className="text-sm text-gray-500 text-center mt-2">
-                    Próximamente
-                  </p>
-                )}
               </div>
             </div>
           </div>
@@ -153,29 +146,33 @@ const StepPayment = () => {
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Resumen de la compra</h2>
               
               <div className="space-y-4 mb-4">
-                {items.map((item) => (
-                  <div key={item.id} className="flex items-center gap-3 border-b pb-3">
-                    <img
-                      src={getProductImage(item.product)}
-                      alt={item.product?.name}
-                      className="w-12 h-12 object-cover rounded"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {item.product?.name}
-                      </p>
-                      <p className="text-xs text-gray-600">
-                        {item.quantity} x {formatPrice(item.unit_price)}
-                      </p>
+                {Array.isArray(items) && items.length > 0 ? (
+                  items.map((item) => (
+                    <div key={item.id || item.product_id} className="flex items-center gap-3 border-b pb-3">
+                      <img
+                        src={getProductImage(item.product)}
+                        alt={item.product?.name || 'Producto'}
+                        className="w-12 h-12 object-cover rounded"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {item.product?.name || 'Producto'}
+                        </p>
+                        <p className="text-xs text-gray-600">
+                          {item.quantity || 0} x {formatPrice(item.unit_price || 0)}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <p className="text-sm text-gray-500 text-center py-4">No hay productos en el carrito</p>
+                )}
               </div>
 
               <div className="space-y-2 border-t pt-4">
                 <div className="flex justify-between text-gray-700">
-                  <span>Productos ({items.length})</span>
-                  <span>{formatPrice(subtotal)}</span>
+                  <span>Productos ({Array.isArray(items) ? items.length : 0})</span>
+                  <span>{formatPrice(subtotal || 0)}</span>
                 </div>
                 
                 <div className="flex justify-between text-gray-700">

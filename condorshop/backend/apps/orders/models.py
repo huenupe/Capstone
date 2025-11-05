@@ -1,6 +1,8 @@
 from django.db import models
 from django.conf import settings
-from apps.products.models import Product
+from django.core.validators import MinValueValidator
+from decimal import Decimal
+from apps.products.models import Product, Category
 
 
 class OrderStatus(models.Model):
@@ -10,7 +12,8 @@ class OrderStatus(models.Model):
 
     class Meta:
         db_table = 'order_statuses'
-        verbose_name_plural = 'Order Statuses'
+        verbose_name = 'Estado de Pedido'
+        verbose_name_plural = 'Estados de Pedido'
 
     def __str__(self):
         return self.code
@@ -52,6 +55,8 @@ class Order(models.Model):
 
     class Meta:
         db_table = 'orders'
+        verbose_name = 'Pedido'
+        verbose_name_plural = 'Pedidos'
         indexes = [
             models.Index(fields=['user'], name='idx_orders_user'),
             models.Index(fields=['status'], name='idx_orders_status'),
@@ -60,7 +65,7 @@ class Order(models.Model):
         ]
 
     def __str__(self):
-        return f"Order {self.id} - {self.customer_email}"
+        return f"Pedido {self.id} - {self.customer_email}"
 
 
 class OrderItem(models.Model):
@@ -84,9 +89,11 @@ class OrderItem(models.Model):
 
     class Meta:
         db_table = 'order_items'
+        verbose_name = 'Item de Pedido'
+        verbose_name_plural = 'Items de Pedido'
 
     def __str__(self):
-        return f"{self.quantity}x {self.product.name} - Order {self.order.id}"
+        return f"{self.quantity}x {self.product.name} - Pedido {self.order.id}"
 
 
 class OrderStatusHistory(models.Model):
@@ -116,11 +123,12 @@ class OrderStatusHistory(models.Model):
 
     class Meta:
         db_table = 'order_status_history'
-        verbose_name_plural = 'Order Status History'
+        verbose_name = 'Historial de Estado de Pedido'
+        verbose_name_plural = 'Historial de Estados de Pedido'
         ordering = ['-changed_at']
 
     def __str__(self):
-        return f"Order {self.order.id} - {self.status.code} at {self.changed_at}"
+        return f"Pedido {self.order.id} - {self.status.code} en {self.changed_at}"
 
 
 class PaymentStatus(models.Model):
@@ -130,7 +138,8 @@ class PaymentStatus(models.Model):
 
     class Meta:
         db_table = 'payment_statuses'
-        verbose_name_plural = 'Payment Statuses'
+        verbose_name = 'Estado de Pago'
+        verbose_name_plural = 'Estados de Pago'
 
     def __str__(self):
         return self.code
@@ -158,9 +167,11 @@ class Payment(models.Model):
 
     class Meta:
         db_table = 'payments'
+        verbose_name = 'Pago'
+        verbose_name_plural = 'Pagos'
 
     def __str__(self):
-        return f"Payment {self.id} - Order {self.order.id} - {self.status.code}"
+        return f"Pago {self.id} - Pedido {self.order.id} - {self.status.code}"
 
 
 class PaymentTransaction(models.Model):
@@ -185,11 +196,139 @@ class PaymentTransaction(models.Model):
 
     class Meta:
         db_table = 'payment_transactions'
+        verbose_name = 'Transacción de Pago'
+        verbose_name_plural = 'Transacciones de Pago'
         indexes = [
             models.Index(fields=['tbk_token'], name='idx_token'),
             models.Index(fields=['buy_order'], name='idx_buy_order'),
         ]
 
     def __str__(self):
-        return f"Transaction {self.buy_order} - {self.status}"
+        return f"Transacción {self.buy_order} - {self.status}"
+
+
+class ShippingZone(models.Model):
+    """Zona de envío (región geográfica)"""
+    id = models.AutoField(primary_key=True, db_column='id')
+    name = models.CharField(max_length=100, unique=True, db_column='name')
+    code = models.CharField(max_length=50, unique=True, db_column='code', help_text='Código único de la zona (ej: REGION_METROPOLITANA)')
+    regions = models.JSONField(
+        default=list,
+        db_column='regions',
+        help_text='Lista de regiones incluidas en esta zona (ej: ["Región Metropolitana", "Santiago"])'
+    )
+    is_active = models.BooleanField(default=True, db_column='is_active')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+
+    class Meta:
+        db_table = 'shipping_zones'
+        verbose_name = 'Zona de Envío'
+        verbose_name_plural = 'Zonas de Envío'
+        indexes = [
+            models.Index(fields=['code'], name='idx_zone_code'),
+            models.Index(fields=['is_active'], name='idx_zone_active'),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
+class ShippingRule(models.Model):
+    """Regla de envío con prioridad y condiciones"""
+    RULE_TYPE_CHOICES = [
+        ('PRODUCT', 'Producto específico'),
+        ('CATEGORY', 'Categoría'),
+        ('ALL', 'Todas las ventas'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='id')
+    zone = models.ForeignKey(
+        ShippingZone,
+        on_delete=models.CASCADE,
+        db_column='zone_id',
+        related_name='shipping_rules',
+        null=True,
+        blank=True,
+        help_text='Si es null, aplica a todas las zonas'
+    )
+    rule_type = models.CharField(
+        max_length=20,
+        choices=RULE_TYPE_CHOICES,
+        db_column='rule_type',
+        help_text='Tipo de regla: PRODUCT (producto), CATEGORY (categoría), ALL (todas)'
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        db_column='product_id',
+        related_name='shipping_rules',
+        null=True,
+        blank=True,
+        help_text='Producto específico (solo si rule_type=PRODUCT)'
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        db_column='category_id',
+        related_name='shipping_rules',
+        null=True,
+        blank=True,
+        help_text='Categoría específica (solo si rule_type=CATEGORY)'
+    )
+    priority = models.IntegerField(
+        default=0,
+        db_column='priority',
+        validators=[MinValueValidator(0)],
+        help_text='Prioridad (mayor número = mayor prioridad). Las reglas de PRODUCT tienen prioridad sobre CATEGORY, y CATEGORY sobre ALL.'
+    )
+    base_cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        db_column='base_cost',
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text='Costo base de envío'
+    )
+    free_shipping_threshold = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        db_column='free_shipping_threshold',
+        validators=[MinValueValidator(Decimal('0.00'))],
+        help_text='Umbral para envío gratis (null = no hay envío gratis para esta regla)'
+    )
+    is_active = models.BooleanField(default=True, db_column='is_active')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+
+    class Meta:
+        db_table = 'shipping_rules'
+        verbose_name = 'Regla de Envío'
+        verbose_name_plural = 'Reglas de Envío'
+        indexes = [
+            models.Index(fields=['zone', 'is_active'], name='idx_rule_zone_active'),
+            models.Index(fields=['rule_type', 'is_active'], name='idx_rule_type_active'),
+            models.Index(fields=['priority'], name='idx_rule_priority'),
+        ]
+        ordering = ['-priority', '-created_at']
+
+    def __str__(self):
+        if self.rule_type == 'PRODUCT' and self.product:
+            return f"Envío {self.product.name} - {self.zone.name if self.zone else 'Todas'}"
+        elif self.rule_type == 'CATEGORY' and self.category:
+            return f"Envío {self.category.name} - {self.zone.name if self.zone else 'Todas'}"
+        else:
+            return f"Envío General - {self.zone.name if self.zone else 'Todas'}"
+
+    def clean(self):
+        """Validar que los campos específicos correspondan al tipo de regla"""
+        from django.core.exceptions import ValidationError
+        if self.rule_type == 'PRODUCT' and not self.product:
+            raise ValidationError('Debe especificar un producto cuando rule_type es PRODUCT')
+        if self.rule_type == 'CATEGORY' and not self.category:
+            raise ValidationError('Debe especificar una categoría cuando rule_type es CATEGORY')
+        if self.rule_type == 'ALL' and (self.product or self.category):
+            raise ValidationError('No debe especificar producto o categoría cuando rule_type es ALL')
 

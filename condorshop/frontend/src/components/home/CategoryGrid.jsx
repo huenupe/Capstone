@@ -18,7 +18,18 @@ const CategoryGrid = () => {
       const categoriesList = Array.isArray(data) ? data : data.results || []
       setCategories(categoriesList)
     } catch (error) {
+      // Loguear el error para debugging - es importante saber qué está pasando
       console.error('Error loading categories:', error)
+      // Si el error es 404, puede ser que no haya categorías aún o el endpoint no exista
+      // Esto es información útil para el desarrollador
+      if (error.response?.status === 404) {
+        console.warn('Categories endpoint returned 404. This may mean:', {
+          reason: 'No categories in database or endpoint not configured',
+          endpoint: error.config?.url,
+          suggestion: 'Check backend categories endpoint or create categories in admin panel'
+        })
+      }
+      setCategories([]) // Asegurar que categories esté vacío en caso de error
     } finally {
       setLoading(false)
     }
@@ -48,6 +59,7 @@ const CategoryGrid = () => {
   }
 
   if (categories.length === 0) {
+    // No mostrar nada si no hay categorías (no es error)
     return null
   }
 

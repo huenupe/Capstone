@@ -13,6 +13,16 @@ export const ordersService = {
   },
 
   /**
+   * Obtener cotización de envío
+   * @param {Object} data - { region, cart_items: [{ product_id, quantity }], subtotal }
+   * POST /api/checkout/shipping-quote
+   */
+  getShippingQuote: async (data) => {
+    const response = await apiClient.post('/checkout/shipping-quote', data)
+    return response.data
+  },
+
+  /**
    * Obtener historial de órdenes del usuario
    * GET /api/orders/ - Historial del usuario autenticado
    */

@@ -4,18 +4,218 @@ from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticate
 from rest_framework.response import Response
 from django.db import transaction
 from django_ratelimit.decorators import ratelimit
-from .models import Order, OrderItem, OrderStatus
+from decimal import Decimal
+from .models import Order, OrderItem, OrderStatus, ShippingZone, ShippingRule
 from .serializers import OrderSerializer, CreateOrderSerializer
 from .services import send_order_confirmation_email
 from apps.cart.models import Cart, CartItem
 from apps.products.models import Product
 
 
-def calculate_shipping_cost(subtotal):
-    """Calcula el costo de envío"""
-    if subtotal >= 50000:
-        return 0
-    return 5000
+def calculate_shipping_cost(subtotal, region=None, cart_items=None):
+    """
+    Calcula el costo de envío basado en reglas de shipping
+    Si no hay reglas configuradas, usa la lógica por defecto (envío gratis sobre 50k)
+    """
+    # Si no hay región o items, usar lógica por defecto
+    if not region or not cart_items:
+        return Decimal('0.00') if subtotal >= 50000 else Decimal('5000.00')
+    
+    # Buscar zona de envío
+    zone = None
+    try:
+        zone = ShippingZone.objects.filter(
+            is_active=True,
+            regions__icontains=region
+        ).first()
+    except Exception:
+        pass
+    
+    # Obtener reglas activas (ordenadas por prioridad)
+    rules = ShippingRule.objects.filter(is_active=True)
+    
+    # Filtrar por zona si existe
+    if zone:
+        rules = rules.filter(zone__in=[zone, None])  # Reglas de la zona o generales
+    else:
+        rules = rules.filter(zone__isnull=True)  # Solo reglas generales
+    
+    rules = rules.order_by('-priority', '-created_at')
+    
+    # Buscar regla aplicable
+    applied_rule = None
+    
+    # Primero buscar reglas de PRODUCT
+    product_ids = [item.product_id for item in cart_items if hasattr(item, 'product_id')]
+    if not product_ids and hasattr(cart_items[0], 'product'):
+        product_ids = [item.product.id for item in cart_items]
+    
+    product_rules = rules.filter(rule_type='PRODUCT', product_id__in=product_ids)
+    if product_rules.exists():
+        applied_rule = product_rules.first()
+    else:
+        # Buscar reglas de CATEGORY
+        category_ids = []
+        for item in cart_items:
+            if hasattr(item, 'product') and item.product.category_id:
+                category_ids.append(item.product.category_id)
+            elif hasattr(item, 'product_id'):
+                try:
+                    product = Product.objects.get(id=item.product_id)
+                    if product.category_id:
+                        category_ids.append(product.category_id)
+                except Product.DoesNotExist:
+                    pass
+        
+        if category_ids:
+            category_rules = rules.filter(rule_type='CATEGORY', category_id__in=category_ids)
+            if category_rules.exists():
+                applied_rule = category_rules.first()
+        
+        # Si no hay regla específica, usar regla ALL
+        if not applied_rule:
+            all_rules = rules.filter(rule_type='ALL')
+            if all_rules.exists():
+                applied_rule = all_rules.first()
+    
+    # Si hay regla aplicable, calcular costo
+    if applied_rule:
+        # Verificar umbral de envío gratis
+        if applied_rule.free_shipping_threshold and subtotal >= applied_rule.free_shipping_threshold:
+            return Decimal('0.00')
+        return applied_rule.base_cost
+    
+    # Fallback: lógica por defecto
+    return Decimal('0.00') if subtotal >= 50000 else Decimal('5000.00')
+
+
+def get_shipping_quote(region, subtotal, cart_items):
+    """
+    Obtiene cotización de envío con información detallada
+    Retorna: { cost, free_shipping_threshold, zone }
+    """
+    zone = None
+    try:
+        zone = ShippingZone.objects.filter(
+            is_active=True,
+            regions__icontains=region
+        ).first()
+    except Exception:
+        pass
+    
+    rules = ShippingRule.objects.filter(is_active=True)
+    if zone:
+        rules = rules.filter(zone__in=[zone, None])
+    else:
+        rules = rules.filter(zone__isnull=True)
+    
+    rules = rules.order_by('-priority', '-created_at')
+    
+    applied_rule = None
+    product_ids = []
+    for item in cart_items:
+        if hasattr(item, 'product_id'):
+            product_ids.append(item.product_id)
+        elif hasattr(item, 'product'):
+            product_ids.append(item.product.id)
+    
+    product_rules = rules.filter(rule_type='PRODUCT', product_id__in=product_ids)
+    if product_rules.exists():
+        applied_rule = product_rules.first()
+    else:
+        category_ids = []
+        for item in cart_items:
+            product = None
+            if hasattr(item, 'product'):
+                product = item.product
+            elif hasattr(item, 'product_id'):
+                try:
+                    product = Product.objects.select_related('category').get(id=item.product_id)
+                except Product.DoesNotExist:
+                    pass
+            
+            if product and product.category_id:
+                category_ids.append(product.category_id)
+        
+        if category_ids:
+            category_rules = rules.filter(rule_type='CATEGORY', category_id__in=category_ids)
+            if category_rules.exists():
+                applied_rule = category_rules.first()
+        
+        if not applied_rule:
+            all_rules = rules.filter(rule_type='ALL')
+            if all_rules.exists():
+                applied_rule = all_rules.first()
+    
+    if applied_rule:
+        cost = Decimal('0.00')
+        if applied_rule.free_shipping_threshold and subtotal >= applied_rule.free_shipping_threshold:
+            cost = Decimal('0.00')
+        else:
+            cost = applied_rule.base_cost
+        
+        return {
+            'cost': float(cost),
+            'free_shipping_threshold': float(applied_rule.free_shipping_threshold) if applied_rule.free_shipping_threshold else None,
+            'zone': zone.name if zone else None,
+            'rule_type': applied_rule.rule_type,
+        }
+    
+    # Fallback
+    default_threshold = 50000
+    cost = Decimal('0.00') if subtotal >= default_threshold else Decimal('5000.00')
+    return {
+        'cost': float(cost),
+        'free_shipping_threshold': default_threshold,
+        'zone': None,
+        'rule_type': 'DEFAULT',
+    }
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticatedOrReadOnly])
+@ratelimit(key='ip', rate='20/m', method='POST')
+def shipping_quote(request):
+    """
+    Obtener cotización de envío
+    POST /api/checkout/shipping-quote
+    Body: { "region": "...", "cart_items": [{ "product_id": 1, "quantity": 2 }] }
+    """
+    region = request.data.get('region')
+    cart_items_data = request.data.get('cart_items', [])
+    subtotal = request.data.get('subtotal', 0)
+    
+    if not region:
+        return Response(
+            {'error': 'La región es requerida'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Construir lista de items para cálculo
+    items_for_calc = []
+    for item_data in cart_items_data:
+        product_id = item_data.get('product_id')
+        if not product_id:
+            continue
+        
+        try:
+            product = Product.objects.select_related('category').get(id=product_id)
+            items_for_calc.append(type('Item', (), {
+                'product_id': product_id,
+                'product': product,
+            })())
+        except Product.DoesNotExist:
+            continue
+    
+    # Si no hay subtotal, calcularlo
+    if not subtotal and items_for_calc:
+        subtotal = sum(
+            item.product.price * item_data.get('quantity', 1)
+            for item, item_data in zip(items_for_calc, cart_items_data)
+        )
+    
+    quote = get_shipping_quote(region, Decimal(str(subtotal)), items_for_calc)
+    return Response(quote)
 
 
 @api_view(['GET'])
@@ -114,7 +314,8 @@ def create_order(request):
 
     # Calcular totales
     subtotal = sum(item['total_price'] for item in items_data)
-    shipping_cost = calculate_shipping_cost(subtotal)
+    shipping_region = serializer.validated_data.get('shipping_region', '')
+    shipping_cost = calculate_shipping_cost(subtotal, shipping_region, cart_items)
     total_amount = subtotal + shipping_cost
 
     # Obtener estado PENDING

@@ -5,6 +5,8 @@ from .models import Cart, CartItem
 class CartItemInline(admin.TabularInline):
     model = CartItem
     extra = 0
+    verbose_name = 'Item'
+    verbose_name_plural = 'Items'
 
 
 @admin.register(Cart)

@@ -44,8 +44,9 @@ export const useToast = () => {
 }
 
 const ToastContainer = () => {
-  const toasts = useToastStore((state) => state.toasts)
-  const removeToast = useToastStore((state) => state.removeToast)
+  // Acceso seguro al store con defaults
+  const toasts = useToastStore((state) => state?.toasts ?? [])
+  const removeToast = useToastStore((state) => state?.removeToast ?? (() => {}))
 
   const types = {
     success: 'bg-green-500',

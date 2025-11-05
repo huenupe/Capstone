@@ -7,11 +7,17 @@ class CategoryAdmin(admin.ModelAdmin):
     list_display = ('name', 'slug', 'created_at')
     prepopulated_fields = {'slug': ('name',)}
     search_fields = ('name',)
+    
+    class Meta:
+        verbose_name = 'Categoría'
+        verbose_name_plural = 'Categorías'
 
 
 class ProductImageInline(admin.TabularInline):
     model = ProductImage
     extra = 1
+    verbose_name = 'Imagen'
+    verbose_name_plural = 'Imágenes'
 
 
 @admin.register(Product)

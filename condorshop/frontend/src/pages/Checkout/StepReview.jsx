@@ -201,30 +201,34 @@ const StepReview = () => {
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Resumen del Pedido</h2>
             
             <div className="space-y-4 mb-6">
-              {items.map((item) => (
-                <div key={item.id} className="flex items-center gap-4 border-b pb-4">
-                  <img
-                    src={getProductImage(item.product)}
-                    alt={item.product?.name}
-                    className="w-16 h-16 object-cover rounded"
-                  />
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-900">{item.product?.name}</p>
-                    <p className="text-sm text-gray-600">
-                      {item.quantity} x {formatPrice(item.unit_price)}
+              {Array.isArray(items) && items.length > 0 ? (
+                items.map((item) => (
+                  <div key={item.id || item.product_id} className="flex items-center gap-4 border-b pb-4">
+                    <img
+                      src={getProductImage(item.product)}
+                      alt={item.product?.name || 'Producto'}
+                      className="w-16 h-16 object-cover rounded"
+                    />
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-900">{item.product?.name || 'Producto'}</p>
+                      <p className="text-sm text-gray-600">
+                        {item.quantity || 0} x {formatPrice(item.unit_price || 0)}
+                      </p>
+                    </div>
+                    <p className="font-semibold text-gray-900">
+                      {formatPrice((item.unit_price || 0) * (item.quantity || 0))}
                     </p>
                   </div>
-                  <p className="font-semibold text-gray-900">
-                    {formatPrice(item.unit_price * item.quantity)}
-                  </p>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="text-sm text-gray-500 text-center py-4">No hay productos en el carrito</p>
+              )}
             </div>
 
             <div className="space-y-2 border-t pt-4">
               <div className="flex justify-between text-gray-700">
                 <span>Subtotal</span>
-                <span>{formatPrice(subtotal)}</span>
+                <span>{formatPrice(subtotal || 0)}</span>
               </div>
               <div className="flex justify-between text-gray-700">
                 <span>Envío</span>

@@ -59,6 +59,8 @@ class User(AbstractUser):
 
     class Meta:
         db_table = 'users'
+        verbose_name = 'Usuario'
+        verbose_name_plural = 'Usuarios'
         indexes = [
             models.Index(fields=['email'], name='idx_email'),
             models.Index(fields=['role'], name='idx_role'),
@@ -69,4 +71,35 @@ class User(AbstractUser):
 
     def is_admin(self):
         return self.role == 'admin'
+
+
+class PasswordResetToken(models.Model):
+    """Token para recuperación de contraseña"""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        db_column='user_id',
+        related_name='password_reset_tokens'
+    )
+    token = models.CharField(max_length=64, unique=True, db_column='token')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    expires_at = models.DateTimeField(db_column='expires_at')
+    used = models.BooleanField(default=False, db_column='used')
+
+    class Meta:
+        db_table = 'password_reset_tokens'
+        verbose_name = 'Token de Restablecimiento de Contraseña'
+        verbose_name_plural = 'Tokens de Restablecimiento de Contraseña'
+        indexes = [
+            models.Index(fields=['token'], name='idx_reset_token'),
+            models.Index(fields=['user', 'used'], name='idx_reset_user_used'),
+        ]
+
+    def __str__(self):
+        return f"Token para {self.user.email}"
+
+    def is_valid(self):
+        """Verifica si el token es válido y no ha expirado"""
+        from django.utils import timezone
+        return not self.used and timezone.now() < self.expires_at
 

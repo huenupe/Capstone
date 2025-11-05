@@ -8,7 +8,7 @@ def ensure_venv():
     """Ensure we're using the local virtual environment."""
     # Get the directory where this script is located
     BASE_DIR = Path(__file__).resolve().parent
-    venv_python = BASE_DIR / 'venv' / 'Scripts' / 'python.exe'
+    venv_python = BASE_DIR / '.venv' / 'Scripts' / 'python.exe'
     
     # Check if we're already using the venv Python
     current_python = Path(sys.executable).resolve()

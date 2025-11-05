@@ -23,6 +23,8 @@ class AuditLog(models.Model):
 
     class Meta:
         db_table = 'audit_logs'
+        verbose_name = 'Registro de Auditoría'
+        verbose_name_plural = 'Registros de Auditoría'
         indexes = [
             models.Index(fields=['user'], name='idx_audit_user'),
             models.Index(fields=['table_name'], name='idx_audit_table'),
@@ -31,6 +33,6 @@ class AuditLog(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        user_info = self.user.email if self.user else 'Anonymous'
-        return f"{self.action} on {self.table_name} by {user_info} at {self.created_at}"
+        user_info = self.user.email if self.user else 'Anónimo'
+        return f"{self.action} en {self.table_name} por {user_info} en {self.created_at}"
 

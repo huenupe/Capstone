@@ -5,6 +5,7 @@ import { getProductImage } from '../utils/getProductImage'
 import QuantityStepper from '../components/forms/QuantityStepper'
 import Button from '../components/common/Button'
 import Spinner from '../components/common/Spinner'
+import PriceTag from '../components/products/PriceTag'
 import { cartService } from '../services/cart'
 import { useCartStore } from '../store/cartSlice'
 import { useToast } from '../components/common/Toast'
@@ -13,18 +14,39 @@ const Cart = () => {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(null)
-  const { items, subtotal, shipping, total, setCart, updateItemQuantity, removeItem } = useCartStore()
+  const { items, subtotal, shipping, total, totalDiscount, setCart, updateItemQuantity, removeItem, updateTotals } = useCartStore()
   const toast = useToast()
 
   useEffect(() => {
     loadCart()
   }, [])
 
+  // Forzar actualización de totales cuando cambian los items
+  useEffect(() => {
+    if (items && items.length > 0 && updateTotals) {
+      updateTotals()
+    }
+  }, [items, updateTotals])
+
   const loadCart = async () => {
     setLoading(true)
     try {
       const data = await cartService.getCart()
+      console.log('Cart data from backend:', data) // Debug
       setCart(data)
+      // Asegurar que los totales se actualicen después de cargar
+      const { updateTotals } = useCartStore.getState()
+      if (updateTotals) {
+        updateTotals()
+      }
+      // Verificar estado después de actualizar
+      const state = useCartStore.getState()
+      console.log('Cart state after setCart:', { 
+        items: state.items, 
+        subtotal: state.subtotal, 
+        shipping: state.shipping, 
+        total: state.total 
+      }) // Debug
     } catch (error) {
       console.error('Error loading cart:', error)
     } finally {
@@ -42,6 +64,7 @@ const Cart = () => {
     try {
       await cartService.updateCartItem(itemId, { quantity })
       updateItemQuantity(itemId, quantity)
+      updateTotals() // Asegurar que los totales se actualicen
       await loadCart() // Refresh to get updated data
       toast.success('Cantidad actualizada')
     } catch (error) {
@@ -57,6 +80,7 @@ const Cart = () => {
     try {
       await cartService.removeCartItem(itemId)
       removeItem(itemId)
+      updateTotals() // Asegurar que los totales se actualicen
       toast.success('Producto eliminado del carrito')
     } catch (error) {
       toast.error('Error al eliminar producto')
@@ -65,8 +89,6 @@ const Cart = () => {
       setUpdating(null)
     }
   }
-
-  const hasFreeShipping = subtotal >= 50000
 
   if (loading) {
     return (
@@ -131,9 +153,14 @@ const Cart = () => {
                         {item.product?.name}
                       </h3>
                     </Link>
-                    <p className="text-gray-600 text-sm mb-2">
-                      {formatPrice(item.unit_price)} c/u
-                    </p>
+                    <div className="mb-2">
+                      <PriceTag
+                        price={item.unit_price}
+                        originalPrice={item.product?.price}
+                        discountPercent={item.product?.discount_percent}
+                        size="sm"
+                      />
+                    </div>
                     
                     <div className="flex items-center gap-4 mt-4">
                       <QuantityStepper
@@ -174,36 +201,19 @@ const Cart = () => {
               <div className="space-y-3 mb-4">
                 <div className="flex justify-between text-gray-700">
                   <span>Productos ({items.length})</span>
-                  <span>{formatPrice(subtotal)}</span>
+                  <span>{formatPrice(subtotal || 0)}</span>
                 </div>
                 
-                <div className="flex justify-between text-gray-700">
-                  <span>Descuentos</span>
-                  <span>{formatPrice(0)}</span>
-                </div>
-                
-                <div className="flex justify-between text-gray-700">
-                  <span>Entregas</span>
-                  <span>
-                    {hasFreeShipping ? (
-                      <span className="text-green-600 font-semibold">GRATIS</span>
-                    ) : (
-                      formatPrice(shipping)
-                    )}
-                  </span>
-                </div>
-                
-                {hasFreeShipping && (
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                    <p className="text-sm text-green-800 font-semibold">
-                      🎉 ¡Envío gratis! Has superado los $50.000
-                    </p>
+                {totalDiscount > 0 && (
+                  <div className="flex justify-between text-gray-700">
+                    <span className="text-green-600">Descuentos</span>
+                    <span className="text-green-600 font-semibold">-{formatPrice(totalDiscount || 0)}</span>
                   </div>
                 )}
                 
                 <div className="border-t pt-3 flex justify-between text-xl font-bold text-gray-900">
                   <span>Total</span>
-                  <span>{formatPrice(total)}</span>
+                  <span>{formatPrice(subtotal || 0)}</span>
                 </div>
               </div>
 
