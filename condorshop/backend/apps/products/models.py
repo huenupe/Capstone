@@ -9,8 +9,8 @@ class Category(models.Model):
     name = models.CharField(max_length=100, unique=True, db_column='name', verbose_name='Nombre')
     slug = models.SlugField(max_length=150, unique=True, db_column='slug', verbose_name='URL amigable')
     description = models.TextField(null=True, blank=True, db_column='description', verbose_name='Descripción')
-    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
-    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at', verbose_name='Actualizado el')
 
     class Meta:
         db_table = 'categories'
@@ -37,12 +37,13 @@ class Product(models.Model):
         null=True,
         blank=True,
         db_column='category_id',
-        related_name='products'
+        related_name='products',
+        verbose_name='Categoría'
     )
-    name = models.CharField(max_length=200, db_column='name')
-    slug = models.SlugField(max_length=200, unique=True, db_column='slug')
-    description = models.TextField(null=True, blank=True, db_column='description')
-    price = models.DecimalField(max_digits=10, decimal_places=2, db_column='price')
+    name = models.CharField(max_length=200, db_column='name', verbose_name='Nombre')
+    slug = models.SlugField(max_length=200, unique=True, db_column='slug', verbose_name='URL amigable')
+    description = models.TextField(null=True, blank=True, db_column='description', verbose_name='Descripción')
+    price = models.DecimalField(max_digits=10, decimal_places=2, db_column='price', verbose_name='Precio')
     discount_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -50,14 +51,15 @@ class Product(models.Model):
         blank=True,
         db_column='discount_price',
         validators=[MinValueValidator(Decimal('0.00'))],
-        help_text='Precio con descuento. Si está configurado, se usa en lugar de price.'
+        help_text='Precio con descuento. Si está configurado, se usa en lugar de price.',
+        verbose_name='Precio de descuento'
     )
-    stock_qty = models.PositiveIntegerField(default=0, db_column='stock_qty')
-    brand = models.CharField(max_length=100, null=True, blank=True, db_column='brand')
-    sku = models.CharField(max_length=64, unique=True, db_column='sku')
-    active = models.BooleanField(default=True, db_column='active')
-    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
-    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+    stock_qty = models.PositiveIntegerField(default=0, db_column='stock_qty', verbose_name='Cantidad en stock')
+    brand = models.CharField(max_length=100, null=True, blank=True, db_column='brand', verbose_name='Marca')
+    sku = models.CharField(max_length=64, unique=True, db_column='sku', verbose_name='SKU')
+    active = models.BooleanField(default=True, db_column='active', verbose_name='Activo')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at', verbose_name='Actualizado el')
 
     class Meta:
         db_table = 'products'
@@ -107,12 +109,13 @@ class ProductImage(models.Model):
         Product,
         on_delete=models.CASCADE,
         db_column='product_id',
-        related_name='images'
+        related_name='images',
+        verbose_name='Producto'
     )
-    url = models.CharField(max_length=500, db_column='url')
-    alt_text = models.CharField(max_length=255, null=True, blank=True, db_column='alt_text')
-    position = models.PositiveIntegerField(default=0, db_column='position')
-    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    url = models.CharField(max_length=500, db_column='url', verbose_name='URL')
+    alt_text = models.CharField(max_length=255, null=True, blank=True, db_column='alt_text', verbose_name='Texto alternativo')
+    position = models.PositiveIntegerField(default=0, db_column='position', verbose_name='Posición')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el')
 
     class Meta:
         db_table = 'product_images'
@@ -124,5 +127,5 @@ class ProductImage(models.Model):
         ordering = ['position']
 
     def __str__(self):
-        return f"{self.product.name} - Image {self.position}"
+        return f"{self.product.name} - Imagen {self.position}"
 

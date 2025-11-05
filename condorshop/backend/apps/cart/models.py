@@ -12,18 +12,20 @@ class Cart(models.Model):
         null=True,
         blank=True,
         db_column='user_id',
-        related_name='carts'
+        related_name='carts',
+        verbose_name='Usuario'
     )
     session_token = models.CharField(
         max_length=100,
         unique=True,
         null=True,
         blank=True,
-        db_column='session_token'
+        db_column='session_token',
+        verbose_name='Token de sesión'
     )
-    is_active = models.BooleanField(default=True, db_column='is_active')
-    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
-    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+    is_active = models.BooleanField(default=True, db_column='is_active', verbose_name='Activo')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at', verbose_name='Actualizado el')
 
     class Meta:
         db_table = 'carts'
@@ -68,19 +70,22 @@ class CartItem(models.Model):
         Cart,
         on_delete=models.CASCADE,
         db_column='cart_id',
-        related_name='items'
+        related_name='items',
+        verbose_name='Carrito'
     )
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
         db_column='product_id',
-        related_name='cart_items'
+        related_name='cart_items',
+        verbose_name='Producto'
     )
-    quantity = models.PositiveIntegerField(db_column='quantity')
+    quantity = models.PositiveIntegerField(db_column='quantity', verbose_name='Cantidad')
     unit_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        db_column='unit_price'
+        db_column='unit_price',
+        verbose_name='Precio unitario'
     )
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
