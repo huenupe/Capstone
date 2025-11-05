@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
-import { formatPrice } from '../utils/formatPrice'
 import { getProductImage } from '../utils/getProductImage'
 import Button from '../components/common/Button'
 import Spinner from '../components/common/Spinner'
+import PriceTag from '../components/products/PriceTag'
 import QuantityStepper from '../components/forms/QuantityStepper'
 import { productsService } from '../services/products'
 import { categoriesService } from '../services/categories'
@@ -30,9 +30,12 @@ const ProductCardWithCart = ({ product, onAddToCart }) => {
           <h3 className="text-lg font-semibold text-gray-900 mb-2 line-clamp-2">
             {product.name}
           </h3>
-          <p className="text-xl font-bold text-primary-600 mb-3">
-            {formatPrice(product.price)}
-          </p>
+          <PriceTag
+            price={product.final_price || product.price}
+            originalPrice={product.has_discount ? product.price : null}
+            discountPercent={product.has_discount ? (product.calculated_discount_percent || product.discount_percent) : null}
+            size="md"
+          />
         </div>
       </Link>
       <div className="px-4 pb-4 space-y-3">

@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import Button from '../common/Button'
 import Spinner from '../common/Spinner'
+import PriceTag from '../products/PriceTag'
 import { productsService } from '../../services/products'
 import { cartService } from '../../services/cart'
 import { useCartStore } from '../../store/cartSlice'
 import { useToast } from '../common/Toast'
-import { formatPrice } from '../../utils/formatPrice'
 import { getProductImage } from '../../utils/getProductImage'
 
 const ProductRail = ({ title, params = {} }) => {
@@ -109,9 +109,12 @@ const ProductRail = ({ title, params = {} }) => {
                 <h3 className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 min-h-[2.5rem]">
                   {product.name}
                 </h3>
-                <p className="text-lg font-bold text-primary-600 mb-3">
-                  {formatPrice(product.price)}
-                </p>
+                <PriceTag
+                  price={product.final_price || product.price}
+                  originalPrice={product.has_discount ? product.price : null}
+                  discountPercent={product.has_discount ? (product.calculated_discount_percent || product.discount_percent) : null}
+                  size="sm"
+                />
               </div>
             </Link>
             <div className="px-4 pb-4">
