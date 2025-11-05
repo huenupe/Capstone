@@ -1,0 +1,31 @@
+import apiClient from './apiClient'
+import { useAuthStore } from '../store/authSlice'
+
+export const ordersService = {
+  /**
+   * Crear orden desde el carrito
+   * @param {Object} data - Datos del pedido (customer, address, etc.)
+   * POST /api/checkout/create según backend
+   */
+  createOrder: async (data) => {
+    const response = await apiClient.post('/checkout/create', data)
+    return response.data
+  },
+
+  /**
+   * Obtener historial de órdenes del usuario
+   * GET /api/orders/ - Historial del usuario autenticado
+   */
+  getUserOrders: async () => {
+    const { user } = useAuthStore.getState()
+    
+    if (!user) {
+      throw new Error('Usuario no autenticado')
+    }
+    
+    // Endpoint correcto según backend: /api/orders/
+    const response = await apiClient.get('/orders')
+    return Array.isArray(response.data) ? response.data : response.data.results || []
+  },
+}
+

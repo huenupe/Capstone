@@ -1,0 +1,230 @@
+import { useState, useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { formatPrice } from '../utils/formatPrice'
+import { getProductImage } from '../utils/getProductImage'
+import QuantityStepper from '../components/forms/QuantityStepper'
+import Button from '../components/common/Button'
+import Spinner from '../components/common/Spinner'
+import { cartService } from '../services/cart'
+import { useCartStore } from '../store/cartSlice'
+import { useToast } from '../components/common/Toast'
+
+const Cart = () => {
+  const navigate = useNavigate()
+  const [loading, setLoading] = useState(true)
+  const [updating, setUpdating] = useState(null)
+  const { items, subtotal, shipping, total, setCart, updateItemQuantity, removeItem } = useCartStore()
+  const toast = useToast()
+
+  useEffect(() => {
+    loadCart()
+  }, [])
+
+  const loadCart = async () => {
+    setLoading(true)
+    try {
+      const data = await cartService.getCart()
+      setCart(data)
+    } catch (error) {
+      console.error('Error loading cart:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleUpdateQuantity = async (itemId, quantity) => {
+    if (quantity < 1) {
+      handleRemoveItem(itemId)
+      return
+    }
+
+    setUpdating(itemId)
+    try {
+      await cartService.updateCartItem(itemId, { quantity })
+      updateItemQuantity(itemId, quantity)
+      await loadCart() // Refresh to get updated data
+      toast.success('Cantidad actualizada')
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Error al actualizar cantidad')
+      console.error('Error updating cart item:', error)
+    } finally {
+      setUpdating(null)
+    }
+  }
+
+  const handleRemoveItem = async (itemId) => {
+    setUpdating(itemId)
+    try {
+      await cartService.removeCartItem(itemId)
+      removeItem(itemId)
+      toast.success('Producto eliminado del carrito')
+    } catch (error) {
+      toast.error('Error al eliminar producto')
+      console.error('Error removing cart item:', error)
+    } finally {
+      setUpdating(null)
+    }
+  }
+
+  const hasFreeShipping = subtotal >= 50000
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex justify-center items-center">
+        <Spinner size="lg" />
+      </div>
+    )
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="bg-white rounded-lg shadow-md p-12 text-center">
+            <svg
+              className="mx-auto h-24 w-24 text-gray-400 mb-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
+              />
+            </svg>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Tu carrito está vacío</h2>
+            <p className="text-gray-600 mb-6">Agrega algunos productos para comenzar</p>
+            <Link to="/">
+              <Button>Ir a Comprar</Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <h1 className="text-3xl font-bold text-gray-900 mb-8">Carrito de Compras</h1>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Items */}
+          <div className="lg:col-span-2 space-y-4">
+            {items.map((item) => (
+              <div key={item.id} className="bg-white rounded-lg shadow-md p-6">
+                <div className="flex gap-4">
+                  <img
+                    src={getProductImage(item.product)}
+                    alt={item.product?.name}
+                    className="w-24 h-24 object-cover rounded"
+                    onError={(e) => {
+                      e.target.src = '/placeholder-product.jpg'
+                    }}
+                  />
+                  
+                  <div className="flex-1">
+                    <Link to={`/product/${item.product?.slug}`}>
+                      <h3 className="text-lg font-semibold text-gray-900 hover:text-primary-600">
+                        {item.product?.name}
+                      </h3>
+                    </Link>
+                    <p className="text-gray-600 text-sm mb-2">
+                      {formatPrice(item.unit_price)} c/u
+                    </p>
+                    
+                    <div className="flex items-center gap-4 mt-4">
+                      <QuantityStepper
+                        value={item.quantity}
+                        onChange={(qty) => handleUpdateQuantity(item.id, qty)}
+                        disabled={updating === item.id}
+                        max={item.product?.stock_qty || 999}
+                      />
+                      
+                      <div className="flex-1 text-right">
+                        <p className="text-lg font-semibold text-gray-900">
+                          {formatPrice(item.unit_price * item.quantity)}
+                        </p>
+                      </div>
+                      
+                      <button
+                        onClick={() => handleRemoveItem(item.id)}
+                        disabled={updating === item.id}
+                        className="text-red-600 hover:text-red-700 disabled:opacity-50"
+                        title="Eliminar"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Summary */}
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-lg shadow-md p-6 sticky top-4">
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">Resumen de la compra</h2>
+              
+              <div className="space-y-3 mb-4">
+                <div className="flex justify-between text-gray-700">
+                  <span>Productos ({items.length})</span>
+                  <span>{formatPrice(subtotal)}</span>
+                </div>
+                
+                <div className="flex justify-between text-gray-700">
+                  <span>Descuentos</span>
+                  <span>{formatPrice(0)}</span>
+                </div>
+                
+                <div className="flex justify-between text-gray-700">
+                  <span>Entregas</span>
+                  <span>
+                    {hasFreeShipping ? (
+                      <span className="text-green-600 font-semibold">GRATIS</span>
+                    ) : (
+                      formatPrice(shipping)
+                    )}
+                  </span>
+                </div>
+                
+                {hasFreeShipping && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                    <p className="text-sm text-green-800 font-semibold">
+                      🎉 ¡Envío gratis! Has superado los $50.000
+                    </p>
+                  </div>
+                )}
+                
+                <div className="border-t pt-3 flex justify-between text-xl font-bold text-gray-900">
+                  <span>Total</span>
+                  <span>{formatPrice(total)}</span>
+                </div>
+              </div>
+
+              <Button
+                onClick={() => navigate('/checkout/customer')}
+                fullWidth
+                size="lg"
+              >
+                Continuar compra
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default Cart
+
+
+
+
+
