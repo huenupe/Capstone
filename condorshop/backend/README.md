@@ -176,7 +176,7 @@ backend/
 | GET | `/api/cart/` | Ver carrito actual | `IsAuthenticatedOrReadOnly` |
 | POST | `/api/cart/add` | Agregar producto al carrito | `IsAuthenticatedOrReadOnly` |
 | PATCH | `/api/cart/items/{id}/` | Actualizar cantidad de item | `IsAuthenticatedOrReadOnly` |
-| DELETE | `/api/cart/items/{id}/` | Eliminar item del carrito | `IsAuthenticatedOrReadOnly` |
+| DELETE | `/api/cart/items/{id}/delete` | Eliminar item del carrito | `IsAuthenticatedOrReadOnly` |
 
 **Nota:** Los usuarios no autenticados pueden usar el carrito con un `X-Session-Token` en los headers.
 
@@ -195,11 +195,12 @@ backend/
 |--------|----------|-------------|----------|
 | GET/POST | `/api/admin/products` | CRUD de productos | `IsAuthenticated` + `IsAdmin` |
 | GET/PATCH/DELETE | `/api/admin/products/{id}` | Operaciones sobre producto | `IsAuthenticated` + `IsAdmin` |
-| POST | `/api/admin/products/{id}/images` | Subir imagen a producto | `IsAuthenticated` + `IsAdmin` |
-| GET | `/api/admin/orders` | Lista de todos los pedidos | `IsAuthenticated` + `IsAdmin` |
-| PATCH | `/api/admin/orders/{id}/status` | Cambiar estado de pedido | `IsAuthenticated` + `IsAdmin` |
-| GET | `/api/admin/orders/export` | Exportar pedidos a CSV | `IsAuthenticated` + `IsAdmin` |
-| GET | `/api/admin/statuses` | Lista de estados de pedido | `IsAuthenticated` + `IsAdmin` |
+| POST | `/api/admin/products/{id}/images` | Subir imagen a producto (form-data: `image`, `alt_text` opcional, `position` opcional) | `IsAuthenticated` + `IsAdmin` |
+| GET | `/api/admin/orders` | Lista de todos los pedidos (filtros: `status`, `customer_email`, `date_from`, `date_to`) | `IsAuthenticated` + `IsAdmin` |
+| GET | `/api/admin/orders/{id}` | Detalle de un pedido | `IsAuthenticated` + `IsAdmin` |
+| PATCH | `/api/admin/orders/{id}/status` | Cambiar estado de pedido (Body: `{ "status_id": 2, "note": "..." }`) | `IsAuthenticated` + `IsAdmin` |
+| GET | `/api/admin/orders/export` | Exportar pedidos a CSV (query params: `status`, `date_from`, `date_to`) | `IsAuthenticated` + `IsAdmin` |
+| GET | `/api/admin/order-statuses` | Lista de estados de pedido | `IsAuthenticated` + `IsAdmin` |
 
 ## 🔐 Autenticación JWT
 
@@ -290,12 +291,12 @@ Los logs incluyen información sobre:
 
 Los estados disponibles son:
 - `PENDING`: Pendiente de pago
-- `PAID`: Pagado
-- `PROCESSING`: En procesamiento
+- `PAID`: Pago confirmado
+- `FAILED`: Pago fallido
+- `CANCELLED`: Cancelado
+- `PREPARING`: En preparación
 - `SHIPPED`: Enviado
 - `DELIVERED`: Entregado
-- `CANCELED`: Cancelado
-- `REFUNDED`: Reembolsado
 
 ### Transacciones Atómicas
 

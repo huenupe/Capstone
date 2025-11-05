@@ -42,17 +42,20 @@ frontend/
 ├── src/
 │   ├── assets/         # Imágenes y recursos
 │   ├── components/     # Componentes reutilizables
-│   │   ├── common/     # Header, Footer, Button, etc.
-│   │   ├── products/   # ProductCard, ProductGallery, PriceTag
-│   │   └── forms/      # TextField, Select, QuantityStepper
+│   │   ├── checkout/   # CheckoutStepper
+│   │   ├── common/     # Header, Footer, Button, Modal, Spinner, Toast
+│   │   ├── forms/      # TextField, Select, QuantityStepper
+│   │   ├── home/       # HeroCarousel, CategoryGrid, ProductRail
+│   │   └── products/   # ProductCard, ProductGallery, PriceTag
 │   ├── pages/          # Páginas de la aplicación
-│   │   ├── Auth/       # Login, Register
-│   │   ├── Checkout/    # StepCustomer, StepAddress, StepReview
-│   │   └── Admin/      # Dashboard, Products, Orders
-│   ├── routes/         # Configuración de rutas
-│   ├── services/       # Servicios API (Axios)
-│   ├── store/          # Zustand stores
-│   ├── utils/          # Utilidades
+│   │   ├── Auth/       # Login, Register, ForgotPassword, ResetPassword
+│   │   ├── Checkout/   # StepCustomer, StepAddress, StepPayment, StepReview
+│   │   ├── Admin/      # Dashboard, Products, Orders
+│   │   └── [Otras]     # Home, Cart, ProductDetail, CategoryPage, Profile, Orders
+│   ├── routes/         # Configuración de rutas (AppRoutes, ProtectedRoute, RoleRoute)
+│   ├── services/       # Servicios API (Axios): auth, products, cart, orders, admin, categories
+│   ├── store/          # Zustand stores (authSlice, cartSlice, checkoutSlice)
+│   ├── utils/          # Utilidades (authToken, formatPrice, getProductImage, storage, validations)
 │   ├── App.jsx         # Componente principal
 │   └── main.jsx        # Punto de entrada
 └── package.json
@@ -106,12 +109,11 @@ El frontend consume la API del backend usando:
 ### Endpoints Utilizados
 
 - **Auth**: `/api/auth/register`, `/api/auth/login`, `/api/users/profile`
-  - ⚠️ **Pendiente**: `/api/auth/password-reset` (solicitar reset)
-  - ⚠️ **Pendiente**: `/api/auth/password-reset/confirm` (confirmar con token)
+  - ⚠️ **Nota**: Existen páginas `ForgotPassword` y `ResetPassword` pero los endpoints del backend aún no están implementados
 - **Productos**: `/api/products/`, `/api/products/{slug}/`, `/api/products/categories/`
-- **Carrito**: `/api/cart/`, `/api/cart/add`, `/api/cart/items/{id}`
-- **Pedidos**: `/api/checkout/create`, `/api/orders/`
-- **Admin**: `/api/admin/products`, `/api/admin/orders`
+- **Carrito**: `/api/cart/`, `/api/cart/add`, `/api/cart/items/{id}`, `/api/cart/items/{id}/delete`
+- **Pedidos**: `/api/checkout/mode`, `/api/checkout/create`, `/api/orders/`, `/api/orders/{id}/`
+- **Admin**: `/api/admin/products`, `/api/admin/orders`, `/api/admin/order-statuses`
 
 Ver `backend/README.md` para documentación completa de la API.
 
@@ -159,6 +161,7 @@ VITE_WEBPAY_ENABLED=false
 - Los formularios usan React Hook Form para validación
 - Checkout: Invitados usan sessionStorage, usuarios logueados usan localStorage
 - Pago: Actualmente es placeholder (Webpay deshabilitado), preparado para integración futura
+- Password Reset: Las páginas `ForgotPassword` y `ResetPassword` están implementadas en el frontend pero los endpoints del backend aún no están disponibles (se muestran como placeholder)
 
 ## Seguridad
 
