@@ -22,7 +22,6 @@ class Migration(migrations.Migration):
                 ('last_name', models.CharField(db_column='last_name', max_length=100)),
                 ('email', models.EmailField(db_column='email', max_length=255, unique=True, validators=[django.core.validators.EmailValidator()])),
                 ('phone', models.CharField(blank=True, db_column='phone', max_length=50, null=True)),
-                ('password_hash', models.CharField(db_column='password_hash', editable=False, max_length=255)),
                 ('role', models.CharField(choices=[('cliente', 'Cliente'), ('admin', 'Admin')], db_column='role', default='cliente', max_length=20)),
                 ('street', models.CharField(blank=True, db_column='street', max_length=200, null=True)),
                 ('city', models.CharField(blank=True, db_column='city', max_length=100, null=True)),
