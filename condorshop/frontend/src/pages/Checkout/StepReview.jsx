@@ -9,6 +9,7 @@ import { useCartStore } from '../../store/cartSlice'
 import { useAuthStore } from '../../store/authSlice'
 import { useToast } from '../../components/common/Toast'
 import { storage } from '../../utils/storage'
+import { getRegionLabel } from '../../constants/regions'
 
 const CHECKOUT_STORAGE_KEY = 'checkout_data'
 
@@ -45,26 +46,7 @@ const StepReview = () => {
     setLoading(true)
     try {
       // Mapear región del frontend al formato del backend (nombre completo)
-      const regionObj = [
-        { value: 'arica', label: 'Arica y Parinacota' },
-        { value: 'tarapaca', label: 'Tarapacá' },
-        { value: 'antofagasta', label: 'Antofagasta' },
-        { value: 'atacama', label: 'Atacama' },
-        { value: 'coquimbo', label: 'Coquimbo' },
-        { value: 'valparaiso', label: "Valparaíso" },
-        { value: 'metropolitana', label: 'Región Metropolitana' },
-        { value: 'ohiggins', label: "O'Higgins" },
-        { value: 'maule', label: 'Maule' },
-        { value: 'nuble', label: 'Ñuble' },
-        { value: 'biobio', label: 'Biobío' },
-        { value: 'araucania', label: 'La Araucanía' },
-        { value: 'rios', label: 'Los Ríos' },
-        { value: 'lagos', label: 'Los Lagos' },
-        { value: 'aysen', label: 'Aysén' },
-        { value: 'magallanes', label: 'Magallanes' },
-      ].find(r => r.value === checkoutData.address.region)
-      
-      const regionLabel = regionObj?.label || checkoutData.address.region
+      const regionLabel = getRegionLabel(checkoutData.address.region)
 
       const orderPayload = {
         customer_name: `${checkoutData.customer.first_name} ${checkoutData.customer.last_name}`,

@@ -12,25 +12,7 @@ import { useToast } from '../components/common/Toast'
 import { validateName, validateChileanPhone, validatePostalCode } from '../utils/validations'
 import AddressForm from '../components/profile/AddressForm'
 import apiClient from '../services/apiClient'
-
-const regions = [
-  { value: 'arica', label: 'Arica y Parinacota' },
-  { value: 'tarapaca', label: 'Tarapacá' },
-  { value: 'antofagasta', label: 'Antofagasta' },
-  { value: 'atacama', label: 'Atacama' },
-  { value: 'coquimbo', label: 'Coquimbo' },
-  { value: 'valparaiso', label: "Valparaíso" },
-  { value: 'metropolitana', label: 'Región Metropolitana' },
-  { value: 'ohiggins', label: "O'Higgins" },
-  { value: 'maule', label: 'Maule' },
-  { value: 'nuble', label: 'Ñuble' },
-  { value: 'biobio', label: 'Biobío' },
-  { value: 'araucania', label: 'La Araucanía' },
-  { value: 'rios', label: 'Los Ríos' },
-  { value: 'lagos', label: 'Los Lagos' },
-  { value: 'aysen', label: 'Aysén' },
-  { value: 'magallanes', label: 'Magallanes' },
-]
+import { REGIONS } from '../constants/regions'
 
 const Profile = () => {
   const navigate = useNavigate()
@@ -409,7 +391,7 @@ const Profile = () => {
               {showAddressForm && (
                 <AddressForm
                   address={editingAddressId ? savedAddresses.find(a => a.id === editingAddressId) : null}
-                  regions={regions}
+              regions={REGIONS}
                   onSave={async (addressData) => {
                     try {
                       // Validar que tenemos los datos mínimos

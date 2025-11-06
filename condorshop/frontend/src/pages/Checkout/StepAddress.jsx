@@ -15,27 +15,9 @@ import PriceTag from '../../components/products/PriceTag'
 import { ordersService } from '../../services/orders'
 import { usersService } from '../../services/users'
 import { validatePostalCode } from '../../utils/validations'
+import { REGIONS, getRegionLabel, matchRegionValue } from '../../constants/regions'
 
 const CHECKOUT_STORAGE_KEY = 'checkout_data'
-
-const regions = [
-  { value: 'arica', label: 'Arica y Parinacota' },
-  { value: 'tarapaca', label: 'Tarapacá' },
-  { value: 'antofagasta', label: 'Antofagasta' },
-  { value: 'atacama', label: 'Atacama' },
-  { value: 'coquimbo', label: 'Coquimbo' },
-  { value: 'valparaiso', label: "Valparaíso" },
-  { value: 'metropolitana', label: 'Región Metropolitana' },
-  { value: 'ohiggins', label: "O'Higgins" },
-  { value: 'maule', label: 'Maule' },
-  { value: 'nuble', label: 'Ñuble' },
-  { value: 'biobio', label: 'Biobío' },
-  { value: 'araucania', label: 'La Araucanía' },
-  { value: 'rios', label: 'Los Ríos' },
-  { value: 'lagos', label: 'Los Lagos' },
-  { value: 'aysen', label: 'Aysén' },
-  { value: 'magallanes', label: 'Magallanes' },
-]
 
 const StepAddress = () => {
   const navigate = useNavigate()
@@ -51,6 +33,23 @@ const StepAddress = () => {
   const [saveAddress, setSaveAddress] = useState(false)
   const [loadingAddresses, setLoadingAddresses] = useState(false)
   
+  const storedCheckoutData = storage.get(CHECKOUT_STORAGE_KEY, !isAuthenticated)
+  const storedAddress = storedCheckoutData?.address
+
+  const defaultValues = storedAddress
+    ? {
+        ...storedAddress,
+        region: matchRegionValue(storedAddress.region || ''),
+      }
+    : {
+        street: user?.street || '',
+        city: user?.city || '',
+        region: matchRegionValue(user?.region || ''),
+        postal_code: user?.postal_code || '',
+        number: user?.number || '',
+        apartment: user?.apartment || '',
+      }
+
   const {
     register,
     handleSubmit,
@@ -58,14 +57,7 @@ const StepAddress = () => {
     setValue,
     watch,
   } = useForm({
-    defaultValues: storage.get(CHECKOUT_STORAGE_KEY, !isAuthenticated)?.address || {
-      street: user?.street || '',
-      city: user?.city || '',
-      region: user?.region || '',
-      postal_code: user?.postal_code || '',
-      number: user?.number || '',
-      apartment: user?.apartment || '',
-    },
+    defaultValues,
   })
 
   const watchedRegion = watch('region')
@@ -74,7 +66,7 @@ const StepAddress = () => {
     if (user && isAuthenticated) {
       setValue('street', user.street || '')
       setValue('city', user.city || '')
-      setValue('region', user.region || '')
+      setValue('region', matchRegionValue(user.region || ''))
       setValue('postal_code', user.postal_code || '')
       setValue('number', user.number || '')
       setValue('apartment', user.apartment || '')
@@ -109,8 +101,7 @@ const StepAddress = () => {
       setLoadingQuote(true)
       try {
         // Obtener el label de la región (nombre completo)
-        const regionObj = regions.find(r => r.value === watchedRegion)
-        const regionName = regionObj?.label || watchedRegion
+        const regionName = getRegionLabel(watchedRegion)
 
         const cartItems = validItems.map(item => ({
           product_id: item.product?.id || item.product_id,
@@ -183,10 +174,7 @@ const StepAddress = () => {
   const selectAddress = (address) => {
     setSelectedAddressId(address.id)
     // Mapear región del backend al formato del frontend
-    const regionValue = regions.find(r => 
-      r.label.toLowerCase().includes(address.region?.toLowerCase()) ||
-      address.region?.toLowerCase().includes(r.value)
-    )?.value || address.region
+    const regionValue = matchRegionValue(address.region)
     
     setValue('street', address.street || '')
     setValue('city', address.city || '')
@@ -226,10 +214,7 @@ const StepAddress = () => {
       const selectedAddress = savedAddresses.find(addr => addr.id === selectedAddressId)
       if (selectedAddress) {
         // Mapear región del backend al formato del frontend
-        const regionValue = regions.find(r => 
-          r.label.toLowerCase().includes(selectedAddress.region?.toLowerCase()) ||
-          selectedAddress.region?.toLowerCase().includes(r.value)
-        )?.value || selectedAddress.region
+        const regionValue = matchRegionValue(selectedAddress.region)
         
         addressData = {
           street: selectedAddress.street || '',
@@ -434,7 +419,7 @@ const StepAddress = () => {
                           required: 'La región es requerida',
                         }}
                         error={errors.region?.message}
-                        options={regions}
+                        options={REGIONS}
                         placeholder="Selecciona una región"
                       />
 
