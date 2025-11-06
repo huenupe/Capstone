@@ -1,6 +1,6 @@
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from django.db import transaction
 from .models import Cart, CartItem
@@ -23,7 +23,7 @@ def get_cart(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticatedOrReadOnly])
+@permission_classes([AllowAny])
 def add_to_cart(request):
     """
     Agregar producto al carrito
@@ -89,7 +89,7 @@ def add_to_cart(request):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticatedOrReadOnly])
+@permission_classes([AllowAny])
 def view_cart(request):
     """
     Ver carrito del usuario/sesión
@@ -123,7 +123,7 @@ def view_cart(request):
 
 
 @api_view(['PATCH'])
-@permission_classes([IsAuthenticatedOrReadOnly])
+@permission_classes([AllowAny])
 def update_cart_item(request, item_id):
     """
     Actualizar cantidad de un item del carrito
@@ -163,7 +163,7 @@ def update_cart_item(request, item_id):
 
 
 @api_view(['DELETE'])
-@permission_classes([IsAuthenticatedOrReadOnly])
+@permission_classes([AllowAny])
 def remove_cart_item(request, item_id):
     """
     Eliminar item del carrito

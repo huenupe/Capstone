@@ -206,14 +206,17 @@ const StepAddress = () => {
     setValue('apartment', '')
   }
 
-  // Verificar si hay dirección guardada
+  // Verificar que los pasos anteriores estén completos
   useEffect(() => {
-    const storedData = storage.get(CHECKOUT_STORAGE_KEY, !isAuthenticated)
-    if (!storedData?.address && !isAuthenticated) {
-      // Si es invitado y no tiene dirección, mostrar modal
-      setShowAddressModal(true)
+    if (!isAuthenticated) {
+      const storedData = storage.get(CHECKOUT_STORAGE_KEY, true)
+      // Si es invitado y no tiene datos del cliente, redirigir a StepCustomer
+      if (!storedData?.customer) {
+        navigate('/checkout/customer')
+        return
+      }
     }
-  }, [isAuthenticated])
+  }, [isAuthenticated, navigate])
 
   const onSubmit = async (data) => {
     // Si hay una dirección seleccionada, usar esa en lugar de los datos del formulario

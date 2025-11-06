@@ -8,6 +8,7 @@ import Spinner from '../components/common/Spinner'
 import PriceTag from '../components/products/PriceTag'
 import { cartService } from '../services/cart'
 import { useCartStore } from '../store/cartSlice'
+import { useAuthStore } from '../store/authSlice'
 import { useToast } from '../components/common/Toast'
 
 const Cart = () => {
@@ -15,6 +16,7 @@ const Cart = () => {
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(null)
   const { items, subtotal, shipping, total, totalDiscount, setCart, updateItemQuantity, removeItem, updateTotals } = useCartStore()
+  const { isAuthenticated } = useAuthStore()
   const toast = useToast()
 
   useEffect(() => {
@@ -210,7 +212,15 @@ const Cart = () => {
               </div>
 
               <Button
-                onClick={() => navigate('/checkout/customer')}
+                onClick={() => {
+                  // Para usuarios autenticados, ir directo a dirección
+                  // Para invitados, ir a datos del cliente primero
+                  if (isAuthenticated) {
+                    navigate('/checkout/address')
+                  } else {
+                    navigate('/checkout/customer')
+                  }
+                }}
                 fullWidth
                 size="lg"
               >

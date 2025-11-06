@@ -185,6 +185,12 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'x-session-token',  # Para carrito de invitados
+]
+
+# Exponer headers personalizados para que el frontend pueda leerlos
+CORS_EXPOSE_HEADERS = [
+    'X-Session-Token',
 ]
 
 # CSRF Settings

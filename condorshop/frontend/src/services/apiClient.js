@@ -20,10 +20,13 @@ apiClient.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`
     }
     
-    // Añadir session token si existe para carrito de invitado
-    const sessionToken = localStorage.getItem('session_token')
-    if (sessionToken && !token) {
-      config.headers['X-Session-Token'] = sessionToken
+    // Añadir session token para carrito de invitado (si no hay token de autenticación)
+    // Si no existe, el backend lo generará automáticamente
+    if (!token) {
+      const sessionToken = localStorage.getItem('session_token')
+      if (sessionToken) {
+        config.headers['X-Session-Token'] = sessionToken
+      }
     }
     
     return config
@@ -36,8 +39,11 @@ apiClient.interceptors.request.use(
 // Interceptor para manejar respuestas y errores
 apiClient.interceptors.response.use(
   (response) => {
-    // Guardar session token si viene en headers
-    const sessionToken = response.headers['x-session-token']
+    // Guardar session token si viene en headers (case-insensitive)
+    const sessionToken = response.headers['x-session-token'] || 
+                        response.headers['X-Session-Token'] ||
+                        response.headers.get?.('x-session-token') ||
+                        response.headers.get?.('X-Session-Token')
     if (sessionToken) {
       localStorage.setItem('session_token', sessionToken)
     }
@@ -45,14 +51,38 @@ apiClient.interceptors.response.use(
     return response
   },
   (error) => {
-    // Si recibimos 401, limpiar sesión y redirigir a login
+    // Si recibimos 401, limpiar sesión
     if (error.response?.status === 401) {
       const { logout } = useAuthStore.getState()
       authToken.remove()
       logout()
       
-      // Solo redirigir si no estamos ya en login
-      if (window.location.pathname !== '/login') {
+      // Rutas públicas que NO deben redirigir a login (permiten checkout de invitados)
+      const publicRoutes = [
+        '/',
+        '/cart',
+        '/checkout/customer',
+        '/checkout/address',
+        '/checkout/payment',
+        '/checkout/review',
+        '/login',
+        '/register',
+        '/forgot-password',
+        '/reset-password',
+      ]
+      
+      // Rutas de productos y categorías (públicas)
+      const isPublicRoute = publicRoutes.some(route => 
+        window.location.pathname === route || 
+        window.location.pathname.startsWith('/product/') ||
+        window.location.pathname.startsWith('/category/')
+      )
+      
+      // Solo redirigir a login si:
+      // 1. No estamos ya en login
+      // 2. NO estamos en una ruta pública (para permitir checkout de invitados)
+      // 3. NO estamos en una ruta de checkout o carrito
+      if (window.location.pathname !== '/login' && !isPublicRoute) {
         window.location.href = '/login'
       }
     }
