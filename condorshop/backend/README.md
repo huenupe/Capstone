@@ -326,6 +326,17 @@ python manage.py check --deploy
 
 Este comando verificará que todas las configuraciones de seguridad estén correctas.
 
+### Ejecución de Tests Automatizados
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate  # En Windows PowerShell
+pip install -r requirements.txt
+pytest
+```
+
+> **Importante:** las pruebas utilizan una base de datos temporal. El costo de correrlas es bajo y cubren flujos críticos de autenticación y checkout.
+
 ### Configuración para Producción
 
 1. **Establecer `DEBUG=False`** en `.env`

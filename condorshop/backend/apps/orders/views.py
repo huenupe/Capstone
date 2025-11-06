@@ -110,7 +110,7 @@ def checkout_mode(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticatedOrReadOnly])
+@permission_classes([AllowAny])
 @ratelimit(key='user', rate='10/h', method='POST')
 @transaction.atomic
 def create_order(request):
