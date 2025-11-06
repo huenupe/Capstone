@@ -18,10 +18,8 @@ const CategoryGrid = () => {
       const categoriesList = Array.isArray(data) ? data : data.results || []
       setCategories(categoriesList)
     } catch (error) {
-      // Loguear el error para debugging - es importante saber qué está pasando
+      // Mantener todos los errores visibles para debugging del proyecto
       console.error('Error loading categories:', error)
-      // Si el error es 404, puede ser que no haya categorías aún o el endpoint no exista
-      // Esto es información útil para el desarrollador
       if (error.response?.status === 404) {
         console.warn('Categories endpoint returned 404. This may mean:', {
           reason: 'No categories in database or endpoint not configured',

@@ -32,37 +32,15 @@ const Cart = () => {
     setLoading(true)
     try {
       const data = await cartService.getCart()
-      console.log('Cart data from backend:', data) // Debug
-      // Log para verificar datos de descuento
-      if (data.items) {
-        data.items.forEach((item, idx) => {
-          console.log(`Item ${idx}:`, {
-            product_name: item.product?.name,
-            unit_price: item.unit_price,
-            product_price: item.product?.price,
-            product_final_price: item.product?.final_price,
-            has_discount: item.product?.has_discount,
-            calculated_discount_percent: item.product?.calculated_discount_percent,
-            discount_percent: item.product?.discount_percent
-          })
-        })
-      }
       setCart(data)
       // Asegurar que los totales se actualicen después de cargar
       const { updateTotals } = useCartStore.getState()
       if (updateTotals) {
         updateTotals()
       }
-      // Verificar estado después de actualizar
-      const state = useCartStore.getState()
-      console.log('Cart state after setCart:', { 
-        items: state.items, 
-        subtotal: state.subtotal, 
-        shipping: state.shipping, 
-        total: state.total 
-      }) // Debug
     } catch (error) {
       console.error('Error loading cart:', error)
+      toast.error('Error al cargar el carrito')
     } finally {
       setLoading(false)
     }
