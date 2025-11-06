@@ -13,6 +13,7 @@ import { formatPrice } from '../../utils/formatPrice'
 import { getProductImage } from '../../utils/getProductImage'
 import PriceTag from '../../components/products/PriceTag'
 import { ordersService } from '../../services/orders'
+import { usersService } from '../../services/users'
 import { validatePostalCode } from '../../utils/validations'
 
 const CHECKOUT_STORAGE_KEY = 'checkout_data'
@@ -45,6 +46,10 @@ const StepAddress = () => {
   const [selectedDeliveryMethod, setSelectedDeliveryMethod] = useState(deliveryMethod || 'delivery')
   const [shippingQuote, setShippingQuote] = useState(null)
   const [loadingQuote, setLoadingQuote] = useState(false)
+  const [savedAddresses, setSavedAddresses] = useState([])
+  const [selectedAddressId, setSelectedAddressId] = useState(null)
+  const [saveAddress, setSaveAddress] = useState(false)
+  const [loadingAddresses, setLoadingAddresses] = useState(false)
   
   const {
     register,
@@ -150,6 +155,57 @@ const StepAddress = () => {
     }
   }, [items, updateTotals])
 
+  // Cargar direcciones guardadas si el usuario está autenticado
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadSavedAddresses()
+    }
+  }, [isAuthenticated])
+
+  const loadSavedAddresses = async () => {
+    setLoadingAddresses(true)
+    try {
+      const addresses = await usersService.getAddresses()
+      setSavedAddresses(addresses || [])
+      
+      // Si hay una dirección por defecto, seleccionarla automáticamente
+      const defaultAddress = addresses?.find(addr => addr.is_default)
+      if (defaultAddress) {
+        selectAddress(defaultAddress)
+      }
+    } catch (error) {
+      console.error('Error loading saved addresses:', error)
+    } finally {
+      setLoadingAddresses(false)
+    }
+  }
+
+  const selectAddress = (address) => {
+    setSelectedAddressId(address.id)
+    // Mapear región del backend al formato del frontend
+    const regionValue = regions.find(r => 
+      r.label.toLowerCase().includes(address.region?.toLowerCase()) ||
+      address.region?.toLowerCase().includes(r.value)
+    )?.value || address.region
+    
+    setValue('street', address.street || '')
+    setValue('city', address.city || '')
+    setValue('region', regionValue || '')
+    setValue('postal_code', address.postal_code || '')
+    setValue('number', address.number || '')
+    setValue('apartment', address.apartment || '')
+  }
+
+  const handleNewAddress = () => {
+    setSelectedAddressId(null)
+    setValue('street', '')
+    setValue('city', '')
+    setValue('region', '')
+    setValue('postal_code', '')
+    setValue('number', '')
+    setValue('apartment', '')
+  }
+
   // Verificar si hay dirección guardada
   useEffect(() => {
     const storedData = storage.get(CHECKOUT_STORAGE_KEY, !isAuthenticated)
@@ -160,16 +216,51 @@ const StepAddress = () => {
   }, [isAuthenticated])
 
   const onSubmit = async (data) => {
+    // Si hay una dirección seleccionada, usar esa en lugar de los datos del formulario
+    let addressData = data
+    
+    if (isAuthenticated && selectedAddressId) {
+      const selectedAddress = savedAddresses.find(addr => addr.id === selectedAddressId)
+      if (selectedAddress) {
+        // Mapear región del backend al formato del frontend
+        const regionValue = regions.find(r => 
+          r.label.toLowerCase().includes(selectedAddress.region?.toLowerCase()) ||
+          selectedAddress.region?.toLowerCase().includes(r.value)
+        )?.value || selectedAddress.region
+        
+        addressData = {
+          street: selectedAddress.street || '',
+          city: selectedAddress.city || '',
+          region: regionValue || '',
+          postal_code: selectedAddress.postal_code || '',
+          number: selectedAddress.number || '',
+          apartment: selectedAddress.apartment || '',
+        }
+      }
+    }
+    
     // Save to storage
     const existingData = storage.get(CHECKOUT_STORAGE_KEY, !isAuthenticated) || {}
     storage.set(CHECKOUT_STORAGE_KEY, {
       ...existingData,
-      address: data,
+      address: {
+        ...addressData,
+        save_address: saveAddress && isAuthenticated && !selectedAddressId, // Solo guardar si es nueva dirección
+      },
       deliveryMethod: selectedDeliveryMethod,
     }, !isAuthenticated)
 
     setDeliveryMethod(selectedDeliveryMethod)
     navigate('/checkout/payment')
+  }
+  
+  // Función para manejar el envío cuando hay dirección seleccionada
+  const handleContinueWithSelectedAddress = () => {
+    if (isAuthenticated && selectedAddressId) {
+      onSubmit({})
+    } else {
+      handleSubmit(onSubmit)()
+    }
   }
 
   const handleDeliveryMethodChange = (method) => {
@@ -202,222 +293,364 @@ const StepAddress = () => {
           <div className="lg:col-span-2 space-y-6">
             {/* Dirección */}
             <div className="bg-white shadow-md rounded-lg p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900">Dirección de Envío</h2>
-                {isAuthenticated && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowAddressModal(true)}
-                  >
-                    Cambiar
-                  </Button>
-                )}
-              </div>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Dirección de Envío</h2>
 
-              <form onSubmit={handleSubmit(onSubmit)}>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Select
-                      label="Región"
-                      name="region"
-                      register={register}
-                      validation={{
-                        required: 'La región es requerida',
-                      }}
-                      error={errors.region?.message}
-                      options={regions}
-                      placeholder="Selecciona una región"
-                    />
-
-                    <TextField
-                      label="Comuna"
-                      name="city"
-                      type="text"
-                      register={register}
-                      validation={{
-                        required: 'La comuna es requerida',
-                      }}
-                      error={errors.city?.message}
-                      placeholder="Selecciona una comuna"
-                    />
+              {/* Dirección Guardada - Estilo Falabella */}
+              {isAuthenticated && selectedAddressId && savedAddresses.length > 0 && (() => {
+                const selectedAddress = savedAddresses.find(addr => addr.id === selectedAddressId)
+                if (!selectedAddress) return null
+                
+                const addressText = [
+                  selectedAddress.label && `Dirección - ${selectedAddress.label}`,
+                  `${selectedAddress.street}${selectedAddress.number ? ` ${selectedAddress.number}` : ''}${selectedAddress.apartment ? `, Dpto ${selectedAddress.apartment}` : ''}`,
+                  `${selectedAddress.city}, ${selectedAddress.region}${selectedAddress.postal_code ? `, ${selectedAddress.postal_code}` : ''}`
+                ].filter(Boolean).join(', ')
+                
+                return (
+                  <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4 flex items-start gap-3">
+                    {/* Ícono de ubicación */}
+                    <svg 
+                      className="w-5 h-5 text-gray-700 mt-0.5 flex-shrink-0" 
+                      fill="currentColor" 
+                      viewBox="0 0 20 20"
+                      aria-hidden="true"
+                    >
+                      <path 
+                        fillRule="evenodd" 
+                        d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" 
+                        clipRule="evenodd" 
+                      />
+                    </svg>
+                    
+                    {/* Texto de la dirección */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-900 leading-relaxed">
+                        {addressText}
+                      </p>
+                      {selectedAddress.is_default && (
+                        <span className="inline-block mt-2 text-xs font-medium text-primary-600 bg-primary-50 px-2 py-1 rounded">
+                          Predeterminada
+                        </span>
+                      )}
+                    </div>
+                    
+                    {/* Botones de acción */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {/* Ícono de información */}
+                      <button
+                        type="button"
+                        className="text-gray-400 hover:text-gray-600 transition-colors"
+                        title="Información de la dirección"
+                        aria-label="Información de la dirección"
+                      >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                      
+                      {/* Botón Cambiar */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedAddressId(null)
+                          handleNewAddress()
+                        }}
+                        className="text-sm text-primary-600 hover:text-primary-700 underline font-medium transition-colors flex items-center gap-1"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                        Cambiar
+                      </button>
+                    </div>
                   </div>
+                )
+              })()}
 
-                  <TextField
-                    label="Calle"
-                    name="street"
-                    type="text"
-                    register={register}
-                    validation={{
-                      required: 'La calle es requerida',
-                    }}
-                    error={errors.street?.message}
-                    placeholder="Ingresa el nombre de la calle"
-                  />
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <TextField
-                      label="Número"
-                      name="number"
-                      type="text"
-                      register={register}
-                      validation={{
-                        required: 'El número es requerido',
-                      }}
-                      error={errors.number?.message}
-                      placeholder="Ingresa el número de la calle"
-                    />
-
-                    <TextField
-                      label="Dpto/Casa/Oficina"
-                      name="apartment"
-                      type="text"
-                      register={register}
-                      error={errors.apartment?.message}
-                      placeholder="Opcional"
-                    />
+              {/* Selector de direcciones guardadas (si no hay dirección seleccionada) */}
+              {isAuthenticated && savedAddresses.length > 0 && !selectedAddressId && (
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Selecciona una dirección guardada
+                  </label>
+                  <div className="space-y-2">
+                    {savedAddresses.map((addr) => {
+                      const addressText = `${addr.street}${addr.number ? ` ${addr.number}` : ''}${addr.apartment ? `, Dpto ${addr.apartment}` : ''}, ${addr.city}, ${addr.region}`
+                      
+                      return (
+                        <div
+                          key={addr.id}
+                          className="border border-gray-200 rounded-lg p-3 hover:border-primary-300 hover:bg-primary-50 transition-colors cursor-pointer"
+                          onClick={() => selectAddress(addr)}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-start gap-3 flex-1">
+                              <svg 
+                                className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" 
+                                fill="currentColor" 
+                                viewBox="0 0 20 20"
+                              >
+                                <path 
+                                  fillRule="evenodd" 
+                                  d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" 
+                                  clipRule="evenodd" 
+                                />
+                              </svg>
+                              <div className="flex-1 min-w-0">
+                                {addr.label && (
+                                  <p className="text-sm font-medium text-gray-900 mb-1">{addr.label}</p>
+                                )}
+                                <p className="text-sm text-gray-600">{addressText}</p>
+                                {addr.is_default && (
+                                  <span className="inline-block mt-1 text-xs font-medium text-primary-600">
+                                    Predeterminada
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <input
+                              type="radio"
+                              name="selectedAddress"
+                              checked={selectedAddressId === addr.id}
+                              onChange={() => selectAddress(addr)}
+                              className="mt-1"
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
+                    <button
+                      type="button"
+                      onClick={handleNewAddress}
+                      className="w-full border-2 border-dashed border-gray-300 rounded-lg p-3 text-sm text-gray-600 hover:border-primary-300 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+                    >
+                      + Agregar nueva dirección
+                    </button>
                   </div>
-
-                  <TextField
-                    label="Código Postal"
-                    name="postal_code"
-                    type="text"
-                    register={register}
-                    validation={{
-                      required: 'El código postal es requerido',
-                      validate: validatePostalCode,
-                    }}
-                    error={errors.postal_code?.message}
-                    placeholder="1234567"
-                  />
                 </div>
+              )}
 
-                {/* Método de Entrega */}
-                <div className="mt-6 pt-6 border-t">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Método de Entrega</h3>
-                  
+              {/* Formulario de dirección - Solo se muestra si no hay dirección seleccionada o si el usuario quiere agregar una nueva */}
+              {(!isAuthenticated || !selectedAddressId || (isAuthenticated && savedAddresses.length === 0)) && (
+                <form onSubmit={handleSubmit(onSubmit)}>
                   <div className="space-y-4">
-                    {/* Retiro en punto */}
-                    <div
-                      className={`border rounded-lg p-4 cursor-pointer transition-colors ${
-                        selectedDeliveryMethod === 'pickup'
-                          ? 'border-primary-600 bg-primary-50'
-                          : 'border-gray-300 hover:border-gray-400'
-                      }`}
-                      onClick={() => handleDeliveryMethodChange('pickup')}
-                      role="radio"
-                      aria-checked={selectedDeliveryMethod === 'pickup'}
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          handleDeliveryMethodChange('pickup')
-                        }
-                      }}
-                    >
-                      <div className="flex items-start">
-                        <input
-                          type="radio"
-                          name="deliveryMethod"
-                          checked={selectedDeliveryMethod === 'pickup'}
-                          onChange={() => handleDeliveryMethodChange('pickup')}
-                          className="mt-1"
-                        />
-                        <div className="ml-3 flex-1">
-                          <div className="flex items-center justify-between">
-                            <h4 className="font-medium text-gray-900">Retiro en un punto</h4>
-                            <span className="text-green-600 font-semibold">GRATIS</span>
-                          </div>
-                          <p className="text-sm text-gray-600 mt-1">
-                            Selecciona una tienda cercana para retirar tu pedido
-                          </p>
-                          {/* Mock: Selector de tienda */}
-                          <select className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg">
-                            <option>Selecciona una tienda (mock)</option>
-                            <option>Tienda Centro - Av. Principal 123</option>
-                            <option>Tienda Norte - Calle Norte 456</option>
-                          </select>
-                          <p className="text-xs text-gray-500 mt-1">
-                            Fecha disponible: Próximamente (mock)
-                          </p>
-                        </div>
-                      </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <Select
+                        label="Región"
+                        name="region"
+                        register={register}
+                        validation={{
+                          required: 'La región es requerida',
+                        }}
+                        error={errors.region?.message}
+                        options={regions}
+                        placeholder="Selecciona una región"
+                      />
+
+                      <TextField
+                        label="Comuna"
+                        name="city"
+                        type="text"
+                        register={register}
+                        validation={{
+                          required: 'La comuna es requerida',
+                        }}
+                        error={errors.city?.message}
+                        placeholder="Selecciona una comuna"
+                      />
                     </div>
 
-                    {/* Envío a domicilio */}
-                    <div
-                      className={`border rounded-lg p-4 cursor-pointer transition-colors ${
-                        selectedDeliveryMethod === 'delivery'
-                          ? 'border-primary-600 bg-primary-50'
-                          : 'border-gray-300 hover:border-gray-400'
-                      }`}
-                      onClick={() => handleDeliveryMethodChange('delivery')}
-                      role="radio"
-                      aria-checked={selectedDeliveryMethod === 'delivery'}
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          handleDeliveryMethodChange('delivery')
-                        }
+                    <TextField
+                      label="Calle"
+                      name="street"
+                      type="text"
+                      register={register}
+                      validation={{
+                        required: 'La calle es requerida',
                       }}
+                      error={errors.street?.message}
+                      placeholder="Ingresa el nombre de la calle"
+                    />
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <TextField
+                        label="Número"
+                        name="number"
+                        type="text"
+                        register={register}
+                        validation={{
+                          required: 'El número es requerido',
+                        }}
+                        error={errors.number?.message}
+                        placeholder="Ingresa el número de la calle"
+                      />
+
+                      <TextField
+                        label="Dpto/Casa/Oficina"
+                        name="apartment"
+                        type="text"
+                        register={register}
+                        error={errors.apartment?.message}
+                        placeholder="Opcional"
+                      />
+                    </div>
+
+                    <TextField
+                      label="Código Postal"
+                      name="postal_code"
+                      type="text"
+                      register={register}
+                      validation={{
+                        required: 'El código postal es requerido',
+                        validate: validatePostalCode,
+                      }}
+                      error={errors.postal_code?.message}
+                      placeholder="1234567"
+                    />
+                  </div>
+
+                  {/* Checkbox para guardar dirección (solo si está autenticado) */}
+                  {isAuthenticated && !selectedAddressId && (
+                    <div className="flex items-center space-x-2 pt-2">
+                      <input
+                        type="checkbox"
+                        id="saveAddress"
+                        checked={saveAddress}
+                        onChange={(e) => setSaveAddress(e.target.checked)}
+                        className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                      />
+                      <label htmlFor="saveAddress" className="text-sm text-gray-700 cursor-pointer">
+                        Guardar esta dirección para futuros pedidos
+                      </label>
+                    </div>
+                  )}
+
+                  {/* Solo botón "Atrás" aquí, "Ir a pagar" se movió al resumen */}
+                  <div className="flex gap-4 pt-6">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => navigate(isAuthenticated ? '/cart' : '/checkout/customer')}
+                      fullWidth
                     >
-                      <div className="flex items-start">
-                        <input
-                          type="radio"
-                          name="deliveryMethod"
-                          checked={selectedDeliveryMethod === 'delivery'}
-                          onChange={() => handleDeliveryMethodChange('delivery')}
-                          className="mt-1"
-                        />
-                        <div className="ml-3 flex-1">
-                          <div className="flex items-center justify-between">
-                            <h4 className="font-medium text-gray-900">Envío a domicilio</h4>
-                            <span className="text-gray-900 font-semibold">
-                              {loadingQuote ? (
-                                <span className="text-gray-500 text-sm">Calculando...</span>
-                              ) : deliveryCost === 0 ? (
-                                <span className="text-green-600">GRATIS</span>
-                              ) : (
-                                formatPrice(deliveryCost)
-                              )}
-                            </span>
-                          </div>
-                          {loadingQuote ? (
-                            <p className="text-sm text-gray-500 mt-1">Obteniendo cotización...</p>
-                          ) : (
-                            <>
-                              <p className="text-sm text-gray-600 mt-1">
-                                Entrega estimada: 2-3 días hábiles
-                              </p>
-                              {freeShippingThreshold && deliveryCost > 0 && (
-                                <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
-                                  <p className="text-xs text-blue-800">
-                                    Agrega {formatPrice(amountNeeded)} más para envío gratis
-                                  </p>
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </div>
+                      Atrás
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </div>
+
+            {/* Método de Entrega - Siempre visible */}
+            <div className="bg-white shadow-md rounded-lg p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Método de Entrega</h3>
+                
+              <div className="space-y-4">
+                {/* Retiro en punto */}
+                <div
+                  className={`border rounded-lg p-4 cursor-pointer transition-colors ${
+                    selectedDeliveryMethod === 'pickup'
+                      ? 'border-primary-600 bg-primary-50'
+                      : 'border-gray-300 hover:border-gray-400'
+                  }`}
+                  onClick={() => handleDeliveryMethodChange('pickup')}
+                  role="radio"
+                  aria-checked={selectedDeliveryMethod === 'pickup'}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      handleDeliveryMethodChange('pickup')
+                    }
+                  }}
+                >
+                  <div className="flex items-start">
+                    <input
+                      type="radio"
+                      name="deliveryMethod"
+                      checked={selectedDeliveryMethod === 'pickup'}
+                      onChange={() => handleDeliveryMethodChange('pickup')}
+                      className="mt-1"
+                    />
+                    <div className="ml-3 flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium text-gray-900">Retiro en un punto</h4>
+                        <span className="text-green-600 font-semibold">GRATIS</span>
                       </div>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Selecciona una tienda cercana para retirar tu pedido
+                      </p>
+                      {/* Mock: Selector de tienda */}
+                      <select className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg">
+                        <option>Selecciona una tienda (mock)</option>
+                        <option>Tienda Centro - Av. Principal 123</option>
+                        <option>Tienda Norte - Calle Norte 456</option>
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Fecha disponible: Próximamente (mock)
+                      </p>
                     </div>
                   </div>
                 </div>
 
-                {/* Solo botón "Atrás" aquí, "Ir a pagar" se movió al resumen */}
-                <div className="flex gap-4 pt-6">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => navigate(isAuthenticated ? '/cart' : '/checkout/customer')}
-                    fullWidth
-                  >
-                    Atrás
-                  </Button>
+                {/* Envío a domicilio */}
+                <div
+                  className={`border rounded-lg p-4 cursor-pointer transition-colors ${
+                    selectedDeliveryMethod === 'delivery'
+                      ? 'border-primary-600 bg-primary-50'
+                      : 'border-gray-300 hover:border-gray-400'
+                  }`}
+                  onClick={() => handleDeliveryMethodChange('delivery')}
+                  role="radio"
+                  aria-checked={selectedDeliveryMethod === 'delivery'}
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      handleDeliveryMethodChange('delivery')
+                    }
+                  }}
+                >
+                  <div className="flex items-start">
+                    <input
+                      type="radio"
+                      name="deliveryMethod"
+                      checked={selectedDeliveryMethod === 'delivery'}
+                      onChange={() => handleDeliveryMethodChange('delivery')}
+                      className="mt-1"
+                    />
+                    <div className="ml-3 flex-1">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium text-gray-900">Envío a domicilio</h4>
+                        <span className="text-gray-900 font-semibold">
+                          {loadingQuote ? (
+                            <span className="text-gray-500 text-sm">Calculando...</span>
+                          ) : deliveryCost === 0 ? (
+                            <span className="text-green-600">GRATIS</span>
+                          ) : (
+                            formatPrice(deliveryCost)
+                          )}
+                        </span>
+                      </div>
+                      {loadingQuote ? (
+                        <p className="text-sm text-gray-500 mt-1">Obteniendo cotización...</p>
+                      ) : (
+                        <>
+                          <p className="text-sm text-gray-600 mt-1">
+                            Entrega estimada: 2-3 días hábiles
+                          </p>
+                          {freeShippingThreshold && deliveryCost > 0 && (
+                            <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg p-2">
+                              <p className="text-xs text-blue-800">
+                                Agrega {formatPrice(amountNeeded)} más para envío gratis
+                              </p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </form>
+              </div>
             </div>
           </div>
 
@@ -506,9 +739,7 @@ const StepAddress = () => {
               {/* Botón "Ir a pagar" movido aquí, debajo del resumen */}
               <div className="mt-6 pt-6 border-t">
                 <Button
-                  onClick={() => {
-                    handleSubmit(onSubmit)()
-                  }}
+                  onClick={handleContinueWithSelectedAddress}
                   fullWidth
                   size="lg"
                 >

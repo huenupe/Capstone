@@ -10,8 +10,8 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django_ratelimit.decorators import ratelimit
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import UserRegistrationSerializer, UserProfileSerializer
-from .models import PasswordResetToken
+from .serializers import UserRegistrationSerializer, UserProfileSerializer, AddressSerializer, AddressCreateSerializer
+from .models import PasswordResetToken, Address
 
 # Importar token blacklist solo si está disponible
 try:
@@ -228,6 +228,76 @@ Equipo CondorShop
     
     # Siempre retornar 204 (éxito) para no revelar si email existe
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def addresses(request):
+    """
+    Listar y crear direcciones del usuario autenticado
+    GET /api/users/addresses - Listar direcciones
+    POST /api/users/addresses - Crear nueva dirección
+    """
+    if request.method == 'GET':
+        addresses = Address.objects.filter(user=request.user)
+        serializer = AddressSerializer(addresses, many=True)
+        return Response(serializer.data)
+    
+    elif request.method == 'POST':
+        serializer = AddressCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            # Si se marca como default, quitar default de otras direcciones
+            if serializer.validated_data.get('is_default'):
+                Address.objects.filter(user=request.user, is_default=True).update(is_default=False)
+            
+            try:
+                address = serializer.save(user=request.user)
+                return Response(AddressSerializer(address).data, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f'Error creating address: {e}')
+                return Response(
+                    {'error': f'Error al crear la dirección: {str(e)}'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def address_detail(request, address_id):
+    """
+    Ver, actualizar o eliminar una dirección específica
+    GET /api/users/addresses/{id} - Ver dirección
+    PATCH /api/users/addresses/{id} - Actualizar dirección
+    DELETE /api/users/addresses/{id} - Eliminar dirección
+    """
+    try:
+        address = Address.objects.get(id=address_id, user=request.user)
+    except Address.DoesNotExist:
+        return Response(
+            {'error': 'Dirección no encontrada'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    if request.method == 'GET':
+        serializer = AddressSerializer(address)
+        return Response(serializer.data)
+    
+    elif request.method == 'PATCH':
+        serializer = AddressSerializer(address, data=request.data, partial=True)
+        if serializer.is_valid():
+            # Si se marca como default, quitar default de otras direcciones
+            if serializer.validated_data.get('is_default'):
+                Address.objects.filter(user=request.user, is_default=True).exclude(id=address.id).update(is_default=False)
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif request.method == 'DELETE':
+        address.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @api_view(['POST'])

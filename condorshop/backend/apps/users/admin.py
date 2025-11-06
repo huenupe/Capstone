@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User, PasswordResetToken
+from .models import User, PasswordResetToken, Address
 
 
 @admin.register(User)
@@ -101,4 +101,36 @@ class PasswordResetTokenAdmin(admin.ModelAdmin):
         return obj.is_valid()
     is_valid.boolean = True
     is_valid.short_description = 'Válido'
+
+
+@admin.register(Address)
+class AddressAdmin(admin.ModelAdmin):
+    list_display = ('user', 'label', 'street', 'city', 'region', 'is_default', 'created_at')
+    list_filter = ('region', 'is_default', 'created_at')
+    search_fields = ('user__email', 'street', 'city', 'region', 'label')
+    readonly_fields = ('created_at', 'updated_at')
+    ordering = ('-is_default', '-created_at')
+    
+    fieldsets = (
+        ('Usuario', {
+            'fields': ('user',)
+        }),
+        ('Dirección', {
+            'fields': ('label', 'street', 'number', 'apartment', 'city', 'region', 'postal_code', 'is_default')
+        }),
+        ('Fechas', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def user(self, obj):
+        return obj.user.email if obj.user else '-'
+    user.short_description = 'Usuario'
+    user.admin_order_field = 'user__email'
+    
+    def created_at(self, obj):
+        return obj.created_at.strftime('%d de %B de %Y a las %H:%M') if obj.created_at else '-'
+    created_at.short_description = 'Creado el'
+    created_at.admin_order_field = 'created_at'
 

@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from .models import User
+from .models import User, Address
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -87,6 +87,49 @@ class UserProfileSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
         return instance
+
+
+class AddressSerializer(serializers.ModelSerializer):
+    """Serializer para direcciones guardadas"""
+    class Meta:
+        model = Address
+        fields = ('id', 'label', 'street', 'number', 'apartment', 'city', 'region', 'postal_code', 'is_default', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'created_at', 'updated_at')
+    
+    def validate(self, attrs):
+        """Validar que solo haya una dirección por defecto"""
+        if attrs.get('is_default') and self.instance:
+            # Si se marca como default, quitar default de otras direcciones
+            Address.objects.filter(user=self.instance.user, is_default=True).exclude(id=self.instance.id).update(is_default=False)
+        return attrs
+
+
+class AddressCreateSerializer(serializers.ModelSerializer):
+    """Serializer para crear direcciones"""
+    label = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=100)
+    number = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=20)
+    apartment = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=100)
+    postal_code = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=20)
+    street = serializers.CharField(max_length=200)
+    city = serializers.CharField(max_length=100)
+    region = serializers.CharField(max_length=100)
+    is_default = serializers.BooleanField(required=False, default=False)
+    
+    class Meta:
+        model = Address
+        fields = ('label', 'street', 'number', 'apartment', 'city', 'region', 'postal_code', 'is_default')
+    
+    def validate(self, attrs):
+        # Convertir strings vacíos a None para campos opcionales
+        if attrs.get('label') == '':
+            attrs['label'] = None
+        if attrs.get('number') == '':
+            attrs['number'] = None
+        if attrs.get('apartment') == '':
+            attrs['apartment'] = None
+        if attrs.get('postal_code') == '':
+            attrs['postal_code'] = None
+        return attrs
 
 
 class UserSerializer(serializers.ModelSerializer):

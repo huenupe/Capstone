@@ -106,3 +106,71 @@ class PasswordResetToken(models.Model):
         from django.utils import timezone
         return not self.used and timezone.now() < self.expires_at
 
+
+class Address(models.Model):
+    """Direcciones guardadas para usuarios"""
+    id = models.BigAutoField(primary_key=True, db_column='id')
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        db_column='user_id',
+        related_name='addresses',
+        verbose_name='Usuario'
+    )
+    label = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        db_column='label',
+        help_text='Nombre descriptivo para esta dirección (ej: "Casa", "Oficina")',
+        verbose_name='Etiqueta'
+    )
+    street = models.CharField(max_length=200, db_column='street', verbose_name='Calle')
+    number = models.CharField(max_length=20, blank=True, null=True, db_column='number', verbose_name='Número')
+    apartment = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        db_column='apartment',
+        help_text='Dpto/Casa/Oficina',
+        verbose_name='Dpto/Casa/Oficina'
+    )
+    city = models.CharField(max_length=100, db_column='city', verbose_name='Comuna')
+    region = models.CharField(max_length=100, db_column='region', verbose_name='Región')
+    postal_code = models.CharField(max_length=20, blank=True, null=True, db_column='postal_code', verbose_name='Código postal')
+    is_default = models.BooleanField(
+        default=False,
+        db_column='is_default',
+        help_text='Marcar como dirección predeterminada',
+        verbose_name='Predeterminada'
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at', verbose_name='Actualizado el')
+
+    class Meta:
+        db_table = 'user_addresses'
+        verbose_name = 'Dirección'
+        verbose_name_plural = 'Direcciones'
+        indexes = [
+            models.Index(fields=['user'], name='idx_address_user'),
+            models.Index(fields=['user', 'is_default'], name='idx_address_user_default'),
+        ]
+        ordering = ['-is_default', '-created_at']
+
+    def __str__(self):
+        address_parts = [self.street]
+        if self.number:
+            address_parts.append(self.number)
+        if self.apartment:
+            address_parts.append(f"Dpto {self.apartment}")
+        address_str = ', '.join(address_parts)
+        if self.label:
+            return f"{self.label} - {address_str}, {self.city}"
+        return f"{address_str}, {self.city}, {self.region}"
+    
+    def save(self, *args, **kwargs):
+        # Si se marca como default, quitar default de otras direcciones del usuario
+        if self.is_default:
+            Address.objects.filter(user=self.user, is_default=True).exclude(id=self.id).update(is_default=False)
+        super().save(*args, **kwargs)
+

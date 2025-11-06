@@ -224,16 +224,29 @@ def checkout_mode(request):
     """
     Informa el modo de checkout
     GET /api/checkout/mode
+    Retorna información sobre direcciones guardadas del usuario
     """
     user = request.user if request.user.is_authenticated else None
     has_address = False
+    saved_addresses = []
     
     if user:
+        # Verificar si tiene dirección en el perfil (legacy)
         has_address = bool(user.street and user.city and user.region)
+        
+        # Obtener direcciones guardadas
+        try:
+            from apps.users.models import Address
+            addresses = Address.objects.filter(user=user).order_by('-is_default', '-created_at')
+            from apps.users.serializers import AddressSerializer
+            saved_addresses = AddressSerializer(addresses, many=True).data
+        except Exception:
+            pass  # Si no existe el modelo aún, continuar sin errores
     
     return Response({
         'is_authenticated': user is not None,
         'has_address': has_address,
+        'saved_addresses': saved_addresses,
         'user_email': user.email if user else None
     })
 
@@ -359,6 +372,28 @@ def create_order(request):
     # Desactivar carrito
     cart.is_active = False
     cart.save()
+    
+    # Guardar dirección si el usuario está autenticado y lo solicitó
+    if request.user.is_authenticated and serializer.validated_data.get('save_address'):
+        try:
+            from apps.users.models import Address
+            address_data = {
+                'user': request.user,
+                'label': serializer.validated_data.get('address_label') or None,
+                'street': serializer.validated_data['shipping_street'],
+                'city': serializer.validated_data['shipping_city'],
+                'region': serializer.validated_data['shipping_region'],
+                'postal_code': serializer.validated_data.get('shipping_postal_code') or None,
+                'is_default': False  # No marcar como default automáticamente
+            }
+            # Extraer número y apartamento si están en la calle (opcional)
+            # Por ahora guardamos la calle completa, pero se puede mejorar
+            Address.objects.create(**address_data)
+        except Exception as e:
+            # No fallar la orden si falla guardar la dirección
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f'Error saving address for order {order.id}: {e}')
 
     # Preparar email de confirmación (se enviará cuando se integre Webpay)
     # send_order_confirmation_email(order)

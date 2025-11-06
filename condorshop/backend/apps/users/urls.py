@@ -13,5 +13,8 @@ urlpatterns = [
     # User profile endpoints
     path('profile', views.profile, name='profile'),
     path('me', views.deactivate_account, name='deactivate_account'),
+    # Address endpoints
+    path('addresses', views.addresses, name='addresses'),
+    path('addresses/<int:address_id>', views.address_detail, name='address_detail'),
 ]
 

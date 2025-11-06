@@ -3,12 +3,34 @@ import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import Button from '../components/common/Button'
 import TextField from '../components/forms/TextField'
+import Select from '../components/forms/Select'
 import Spinner from '../components/common/Spinner'
 import { authService } from '../services/auth'
+import { usersService } from '../services/users'
 import { useAuthStore } from '../store/authSlice'
 import { useToast } from '../components/common/Toast'
 import { validateName, validateChileanPhone, validatePostalCode } from '../utils/validations'
+import AddressForm from '../components/profile/AddressForm'
 import apiClient from '../services/apiClient'
+
+const regions = [
+  { value: 'arica', label: 'Arica y Parinacota' },
+  { value: 'tarapaca', label: 'Tarapacá' },
+  { value: 'antofagasta', label: 'Antofagasta' },
+  { value: 'atacama', label: 'Atacama' },
+  { value: 'coquimbo', label: 'Coquimbo' },
+  { value: 'valparaiso', label: "Valparaíso" },
+  { value: 'metropolitana', label: 'Región Metropolitana' },
+  { value: 'ohiggins', label: "O'Higgins" },
+  { value: 'maule', label: 'Maule' },
+  { value: 'nuble', label: 'Ñuble' },
+  { value: 'biobio', label: 'Biobío' },
+  { value: 'araucania', label: 'La Araucanía' },
+  { value: 'rios', label: 'Los Ríos' },
+  { value: 'lagos', label: 'Los Lagos' },
+  { value: 'aysen', label: 'Aysén' },
+  { value: 'magallanes', label: 'Magallanes' },
+]
 
 const Profile = () => {
   const navigate = useNavigate()
@@ -18,6 +40,10 @@ const Profile = () => {
   const [hasChanges, setHasChanges] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [savedAddresses, setSavedAddresses] = useState([])
+  const [loadingAddresses, setLoadingAddresses] = useState(false)
+  const [editingAddressId, setEditingAddressId] = useState(null)
+  const [showAddressForm, setShowAddressForm] = useState(false)
   const toast = useToast()
   
   const {
@@ -42,13 +68,13 @@ const Profile = () => {
         last_name: user.last_name || '',
         email: user.email || '',
         phone: user.phone || '',
-        street: user.street || '',
-        city: user.city || '',
-        region: user.region || '',
-        postal_code: user.postal_code || '',
       })
     }
   }, [user, reset])
+
+  useEffect(() => {
+    loadSavedAddresses()
+  }, [])
 
   useEffect(() => {
     setHasChanges(isDirty)
@@ -64,6 +90,49 @@ const Profile = () => {
       console.error('Error loading profile:', error)
     } finally {
       setLoadingProfile(false)
+    }
+  }
+
+  const loadSavedAddresses = async () => {
+    setLoadingAddresses(true)
+    try {
+      const addresses = await usersService.getAddresses()
+      setSavedAddresses(addresses || [])
+    } catch (error) {
+      console.error('Error loading saved addresses:', error)
+    } finally {
+      setLoadingAddresses(false)
+    }
+  }
+
+  const handleEditAddress = (address) => {
+    setEditingAddressId(address.id)
+    setShowAddressForm(true)
+    // Los campos se llenarán en el formulario de dirección
+  }
+
+  const handleDeleteAddress = async (addressId) => {
+    if (!window.confirm('¿Estás seguro de que quieres eliminar esta dirección?')) {
+      return
+    }
+    try {
+      await usersService.deleteAddress(addressId)
+      toast.success('Dirección eliminada exitosamente')
+      loadSavedAddresses()
+    } catch (error) {
+      toast.error('Error al eliminar la dirección')
+      console.error('Error deleting address:', error)
+    }
+  }
+
+  const handleSetDefaultAddress = async (addressId) => {
+    try {
+      await usersService.updateAddress(addressId, { is_default: true })
+      toast.success('Dirección predeterminada actualizada')
+      loadSavedAddresses()
+    } catch (error) {
+      toast.error('Error al actualizar la dirección predeterminada')
+      console.error('Error setting default address:', error)
     }
   }
 
@@ -90,10 +159,6 @@ const Profile = () => {
         last_name: user.last_name || '',
         email: user.email || '',
         phone: user.phone || '',
-        street: user.street || '',
-        city: user.city || '',
-        region: user.region || '',
-        postal_code: user.postal_code || '',
       })
       setHasChanges(false)
     }
@@ -205,48 +270,11 @@ const Profile = () => {
               />
             </div>
 
-            <div className="border-t pt-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Dirección</h2>
-              
-              <TextField
-                label="Calle y Número"
-                name="street"
-                register={register}
-                error={errors.street?.message}
-              />
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <TextField
-                  label="Ciudad"
-                  name="city"
-                  register={register}
-                  error={errors.city?.message}
-                />
-
-                <TextField
-                  label="Región"
-                  name="region"
-                  register={register}
-                  error={errors.region?.message}
-                />
-              </div>
-
-              <TextField
-                label="Código Postal"
-                name="postal_code"
-                register={register}
-                validation={{
-                  validate: validatePostalCode,
-                }}
-                error={errors.postal_code?.message}
-              />
-            </div>
-
             <div className="pt-4 space-y-3">
               <div className="flex gap-3">
                 <Button
                   type="submit"
-                  disabled={loading || !hasChanges}
+                  disabled={loading || !hasChanges || showAddressForm}
                   size="lg"
                   className="flex-1"
                 >
@@ -257,7 +285,7 @@ const Profile = () => {
                     type="button"
                     variant="outline"
                     onClick={handleDiscard}
-                    disabled={loading}
+                    disabled={loading || showAddressForm}
                     size="lg"
                   >
                     Descartar
@@ -286,6 +314,157 @@ const Profile = () => {
             </div>
           </div>
         </form>
+
+        {/* Sección de Direcciones - Fuera del formulario principal para evitar anidamiento de forms */}
+        <div className="bg-white shadow-md rounded-lg p-8 mt-6">
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Direcciones Guardadas</h2>
+              
+              {loadingAddresses ? (
+                <div className="flex justify-center py-4">
+                  <Spinner size="sm" />
+                </div>
+              ) : savedAddresses.length > 0 ? (
+                <div className="space-y-3 mb-4">
+                  {savedAddresses.map((address) => (
+                    <div
+                      key={address.id}
+                      className={`border rounded-lg p-4 ${
+                        address.is_default ? 'border-primary-600 bg-primary-50' : 'border-gray-200'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          {address.is_default && (
+                            <span className="inline-block bg-primary-600 text-white text-xs px-2 py-1 rounded mb-2">
+                              Predeterminada
+                            </span>
+                          )}
+                          {address.label && (
+                            <h3 className="font-semibold text-gray-900 mb-1">{address.label}</h3>
+                          )}
+                          <p className="text-sm text-gray-700">
+                            {address.street} {address.number ? address.number : ''}
+                            {address.apartment ? `, Dpto ${address.apartment}` : ''}
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            {address.city}, {address.region}
+                          </p>
+                          {address.postal_code && (
+                            <p className="text-xs text-gray-500">
+                              Código Postal: {address.postal_code}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex gap-2 ml-4">
+                          {!address.is_default && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleSetDefaultAddress(address.id)}
+                            >
+                              Predeterminada
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEditAddress(address)}
+                          >
+                            Editar
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDeleteAddress(address.id)}
+                            className="text-red-600 border-red-300 hover:bg-red-50"
+                          >
+                            Eliminar
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-sm mb-4">
+                  No tienes direcciones guardadas. Agrega una nueva dirección a continuación.
+                </p>
+              )}
+
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditingAddressId(null)
+                  setShowAddressForm(!showAddressForm)
+                }}
+                className="mb-4"
+              >
+                {showAddressForm ? 'Cancelar' : editingAddressId ? 'Cancelar Edición' : 'Agregar Nueva Dirección'}
+              </Button>
+
+              {showAddressForm && (
+                <AddressForm
+                  address={editingAddressId ? savedAddresses.find(a => a.id === editingAddressId) : null}
+                  regions={regions}
+                  onSave={async (addressData) => {
+                    try {
+                      // Validar que tenemos los datos mínimos
+                      if (!addressData.street || !addressData.city || !addressData.region || !addressData.postal_code) {
+                        toast.error('Por favor completa todos los campos requeridos')
+                        return
+                      }
+                      
+                      if (editingAddressId) {
+                        await usersService.updateAddress(editingAddressId, addressData)
+                        toast.success('Dirección actualizada exitosamente')
+                        setShowAddressForm(false)
+                        setEditingAddressId(null)
+                        await loadSavedAddresses()
+                      } else {
+                        await usersService.createAddress(addressData)
+                        toast.success('Dirección guardada exitosamente')
+                        setShowAddressForm(false)
+                        setEditingAddressId(null)
+                        await loadSavedAddresses()
+                      }
+                    } catch (error) {
+                      let errorMessage = 'Error al guardar la dirección'
+                      
+                      if (error.response?.data) {
+                        if (typeof error.response.data === 'string') {
+                          errorMessage = error.response.data
+                        } else if (error.response.data.error) {
+                          errorMessage = error.response.data.error
+                        } else if (error.response.data.message) {
+                          errorMessage = error.response.data.message
+                        } else if (typeof error.response.data === 'object') {
+                          // Si hay errores de validación, mostrar el primero
+                          const firstError = Object.values(error.response.data)[0]
+                          if (Array.isArray(firstError)) {
+                            errorMessage = firstError[0]
+                          } else if (typeof firstError === 'string') {
+                            errorMessage = firstError
+                          }
+                        }
+                      } else if (error.message) {
+                        errorMessage = error.message
+                      }
+                      
+                      toast.error(errorMessage)
+                      throw error // Re-lanzar para que el formulario sepa que hubo un error
+                    }
+                  }}
+                  onCancel={() => {
+                    setShowAddressForm(false)
+                    setEditingAddressId(null)
+                  }}
+                />
+              )}
+        </div>
       </div>
     </div>
   )

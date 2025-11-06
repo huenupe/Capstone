@@ -44,15 +44,39 @@ const StepReview = () => {
 
     setLoading(true)
     try {
+      // Mapear región del frontend al formato del backend (nombre completo)
+      const regionObj = [
+        { value: 'arica', label: 'Arica y Parinacota' },
+        { value: 'tarapaca', label: 'Tarapacá' },
+        { value: 'antofagasta', label: 'Antofagasta' },
+        { value: 'atacama', label: 'Atacama' },
+        { value: 'coquimbo', label: 'Coquimbo' },
+        { value: 'valparaiso', label: "Valparaíso" },
+        { value: 'metropolitana', label: 'Región Metropolitana' },
+        { value: 'ohiggins', label: "O'Higgins" },
+        { value: 'maule', label: 'Maule' },
+        { value: 'nuble', label: 'Ñuble' },
+        { value: 'biobio', label: 'Biobío' },
+        { value: 'araucania', label: 'La Araucanía' },
+        { value: 'rios', label: 'Los Ríos' },
+        { value: 'lagos', label: 'Los Lagos' },
+        { value: 'aysen', label: 'Aysén' },
+        { value: 'magallanes', label: 'Magallanes' },
+      ].find(r => r.value === checkoutData.address.region)
+      
+      const regionLabel = regionObj?.label || checkoutData.address.region
+
       const orderPayload = {
+        customer_name: `${checkoutData.customer.first_name} ${checkoutData.customer.last_name}`,
         customer_email: checkoutData.customer.email,
-        customer_first_name: checkoutData.customer.first_name,
-        customer_last_name: checkoutData.customer.last_name,
-        customer_phone: checkoutData.customer.phone,
-        street: checkoutData.address.street,
-        city: checkoutData.address.city,
-        region: checkoutData.address.region,
-        postal_code: checkoutData.address.postal_code,
+        customer_phone: checkoutData.customer.phone || '',
+        shipping_street: checkoutData.address.street,
+        shipping_city: checkoutData.address.city,
+        shipping_region: regionLabel,
+        shipping_postal_code: checkoutData.address.postal_code || '',
+        // Guardar dirección si el usuario está autenticado y lo solicitó
+        save_address: checkoutData.address.save_address || false,
+        address_label: checkoutData.address.save_address ? (checkoutData.address.label || '') : '',
       }
 
       const order = await ordersService.createOrder(orderPayload)
