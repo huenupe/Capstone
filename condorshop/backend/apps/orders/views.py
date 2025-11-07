@@ -49,7 +49,7 @@ def shipping_quote(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    # Construir lista de items para cálculo
+    # Build item list for shipping calculation
     items_for_calc = []
     for item_data in cart_items_data:
         product_id = item_data.get('product_id')
@@ -65,7 +65,7 @@ def shipping_quote(request):
         except Product.DoesNotExist:
             continue
     
-    # Si no hay subtotal, calcularlo
+    # Calculate subtotal if not provided
     if not subtotal and items_for_calc:
         subtotal = sum(
             item.product.price * item_data.get('quantity', 1)
@@ -89,17 +89,17 @@ def checkout_mode(request):
     saved_addresses = []
     
     if user:
-        # Verificar si tiene dirección en el perfil (legacy)
+    # Check legacy address fields
         has_address = bool(user.street and user.city and user.region)
         
-        # Obtener direcciones guardadas
+        # Load saved addresses
         try:
             from apps.users.models import Address
             addresses = Address.objects.filter(user=user).order_by('-is_default', '-created_at')
             from apps.users.serializers import AddressSerializer
             saved_addresses = AddressSerializer(addresses, many=True).data
         except Exception:
-            pass  # Si no existe el modelo aún, continuar sin errores
+            pass  # best-effort if the Address model is unavailable
     
     return Response({
         'is_authenticated': user is not None,
