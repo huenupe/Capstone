@@ -337,6 +337,15 @@ pytest
 
 > **Importante:** las pruebas utilizan una base de datos temporal. El costo de correrlas es bajo y cubren flujos críticos de autenticación y checkout.
 
+### Auditoría de dependencias
+
+```powershell
+$env:PIPAPI_PYTHON_LOCATION = (Resolve-Path .\.venv\Scripts\python.exe)
+pip-audit
+```
+
+> Ejecuta la auditoría desde el entorno virtual para asegurar que solo se analicen las dependencias del proyecto.
+
 ### Configuración para Producción
 
 1. **Establecer `DEBUG=False`** en `.env`

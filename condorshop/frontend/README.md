@@ -4,9 +4,11 @@ Frontend SPA para CondorShop construido con React 18, Vite, React Router v6, Tai
 
 ## 🔒 Estado de Seguridad
 
-✅ **Todas las vulnerabilidades resueltas** (última auditoría: 2025-01-27)
-- Vite actualizado a 7.1.12 (vulnerabilidad esbuild corregida)
-- Auditoría limpia: 0 vulnerabilidades detectadas
+✅ **Todas las vulnerabilidades resueltas** (última auditoría: 2025-11-07)
+- Vite actualizado a 7.2.1
+- Axios actualizado a 1.13.2
+- React Hook Form actualizado a 7.66.0
+- Auditoría `npm audit --omit=dev` sin hallazgos
 - Ver `SECURITY_REMEDIATION_PLAN.md` para detalles completos
 
 ## Requisitos
@@ -127,15 +129,15 @@ Ver `backend/README.md` para documentación completa de la API.
 ## Versiones Soportadas
 
 ### Herramientas Principales
-- **Vite**: 7.1.12+
+- **Vite**: 7.2.1+
 - **React**: 18.3.1+
-- **React Router**: 6.26.0+
-- **Tailwind CSS**: 3.4.13+
+- **React Router**: 6.30.1+
+- **Tailwind CSS**: 3.4.18+
 
 ### Verificación de Seguridad
 ```bash
-npm audit          # Auditar vulnerabilidades
-npm audit fix      # Corregir automáticamente (si es seguro)
+npm audit --omit=dev   # Auditar vulnerabilidades de runtime
+npm audit fix          # Corregir automáticamente (si es seguro)
 ```
 
 ## Variables de Entorno
