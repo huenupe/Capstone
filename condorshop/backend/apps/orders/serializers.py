@@ -1,6 +1,7 @@
 from rest_framework import serializers
+
 from .models import Order, OrderItem, OrderStatus, OrderStatusHistory
-from apps.products.serializers import ProductListSerializer
+from apps.products.serializers import ProductListSerializer, to_int
 
 
 class OrderStatusSerializer(serializers.ModelSerializer):
@@ -11,15 +12,25 @@ class OrderStatusSerializer(serializers.ModelSerializer):
 
 class OrderItemSerializer(serializers.ModelSerializer):
     product = ProductListSerializer(read_only=True)
+    unit_price = serializers.SerializerMethodField()
+    total_price = serializers.SerializerMethodField()
 
     class Meta:
         model = OrderItem
         fields = ('id', 'product', 'quantity', 'unit_price', 'total_price')
 
+    def get_unit_price(self, obj):
+        return to_int(obj.unit_price)
+
+    def get_total_price(self, obj):
+        return to_int(obj.total_price)
+
 
 class OrderSerializer(serializers.ModelSerializer):
     status = OrderStatusSerializer(read_only=True)
     items = OrderItemSerializer(many=True, read_only=True)
+    total_amount = serializers.SerializerMethodField()
+    shipping_cost = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -29,6 +40,12 @@ class OrderSerializer(serializers.ModelSerializer):
             'total_amount', 'shipping_cost', 'currency', 'created_at', 'updated_at', 'items'
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
+
+    def get_total_amount(self, obj):
+        return to_int(obj.total_amount)
+
+    def get_shipping_cost(self, obj):
+        return to_int(obj.shipping_cost)
 
 
 class CreateOrderSerializer(serializers.Serializer):
@@ -60,6 +77,8 @@ class OrderAdminSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     user_email = serializers.SerializerMethodField()
     status_history = OrderStatusHistorySerializer(many=True, read_only=True)
+    total_amount = serializers.SerializerMethodField()
+    shipping_cost = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -74,4 +93,10 @@ class OrderAdminSerializer(serializers.ModelSerializer):
 
     def get_user_email(self, obj):
         return obj.user.email if obj.user else None
+
+    def get_total_amount(self, obj):
+        return to_int(obj.total_amount)
+
+    def get_shipping_cost(self, obj):
+        return to_int(obj.shipping_cost)
 

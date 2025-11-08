@@ -1,5 +1,20 @@
+from decimal import Decimal, InvalidOperation
+
 from rest_framework import serializers
+
 from .models import Category, Product, ProductImage
+
+
+def to_int(value):
+    """Convertir Decimals u otras representaciones numéricas a enteros."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(Decimal(str(value)))
+    except (InvalidOperation, TypeError, ValueError):
+        return int(value)
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -57,6 +72,8 @@ class ProductListSerializer(serializers.ModelSerializer):
     discount_percent = serializers.SerializerMethodField()
     calculated_discount_percent = serializers.SerializerMethodField()
     has_discount = serializers.ReadOnlyField()
+    price = serializers.SerializerMethodField()
+    discount_price = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -74,6 +91,12 @@ class ProductListSerializer(serializers.ModelSerializer):
     def get_discount_percent(self, obj):
         """Retorna el porcentaje de descuento calculado (entero)"""
         return int(obj.calculated_discount_percent)
+
+    def get_price(self, obj):
+        return to_int(obj.price)
+
+    def get_discount_price(self, obj):
+        return to_int(obj.discount_price)
 
     def get_main_image(self, obj):
         """Retorna la primera imagen ordenada por position con URL absoluta"""
@@ -97,6 +120,8 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     discount_percent = serializers.SerializerMethodField()
     calculated_discount_percent = serializers.SerializerMethodField()
     has_discount = serializers.ReadOnlyField()
+    price = serializers.SerializerMethodField()
+    discount_price = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -115,6 +140,12 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     def get_discount_percent(self, obj):
         """Retorna el porcentaje de descuento calculado (entero)"""
         return int(obj.calculated_discount_percent)
+
+    def get_price(self, obj):
+        return to_int(obj.price)
+
+    def get_discount_price(self, obj):
+        return to_int(obj.discount_price)
 
 
 class ProductAdminSerializer(serializers.ModelSerializer):
@@ -207,4 +238,12 @@ class ProductAdminSerializer(serializers.ModelSerializer):
                 })
         
         return attrs
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['price'] = to_int(instance.price)
+        data['final_price'] = to_int(instance.final_price)
+        data['discount_price'] = to_int(instance.discount_price)
+        data['discount_amount'] = to_int(instance.discount_amount)
+        return data
 

@@ -23,8 +23,8 @@ def get_shipping_quote(region, subtotal, cart_items):
     threshold = evaluation['free_shipping_threshold']
 
     return {
-        'cost': float(evaluation['cost']),
-        'free_shipping_threshold': float(threshold) if threshold is not None else None,
+        'cost': int(evaluation['cost']),
+        'free_shipping_threshold': int(threshold) if threshold is not None else None,
         'zone': evaluation['zone'],
         'rule_type': evaluation['rule_type'],
     }

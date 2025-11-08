@@ -1,15 +1,25 @@
+from decimal import Decimal
+
 from rest_framework import serializers
+
 from .models import Cart, CartItem
-from apps.products.serializers import ProductListSerializer
+from apps.products.serializers import ProductListSerializer, to_int
 
 
 class CartItemSerializer(serializers.ModelSerializer):
     product = ProductListSerializer(read_only=True)
-    subtotal = serializers.ReadOnlyField()
+    unit_price = serializers.SerializerMethodField()
+    subtotal = serializers.SerializerMethodField()
 
     class Meta:
         model = CartItem
         fields = ('id', 'product', 'quantity', 'unit_price', 'subtotal')
+
+    def get_unit_price(self, obj):
+        return to_int(obj.unit_price)
+
+    def get_subtotal(self, obj):
+        return to_int(obj.subtotal)
 
 
 class CartSerializer(serializers.ModelSerializer):
@@ -24,7 +34,8 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_subtotal(self, obj):
         """Calcula el subtotal sumando todos los items"""
-        return sum(item.subtotal for item in obj.items.all())
+        total = sum((item.subtotal for item in obj.items.all()), Decimal('0'))
+        return to_int(total)
 
     def get_shipping_cost(self, obj):
         """Costo de envío fijo (puede modificarse después)"""
@@ -35,7 +46,9 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_total(self, obj):
         """Total = subtotal + shipping"""
-        return self.get_subtotal(obj) + self.get_shipping_cost(obj)
+        subtotal = self.get_subtotal(obj)
+        shipping = self.get_shipping_cost(obj)
+        return subtotal + shipping
 
 
 class AddToCartSerializer(serializers.Serializer):
