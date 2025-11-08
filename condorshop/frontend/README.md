@@ -86,6 +86,8 @@ frontend/
 4. **StepPayment**: Método de pago (Webpay placeholder)
 5. **StepReview**: Revisión y confirmación de pedido
 
+Durante este flujo el frontend solicita cotizaciones de envío en tiempo real mediante `/api/checkout/shipping-quote` y reutiliza el `X-Session-Token` entregado por el backend para mantener sincronizado el carrito del invitado.
+
 ### Páginas Protegidas (Cliente)
 - **Profile**: Perfil y datos personales
 - **Orders**: Historial de pedidos
@@ -114,7 +116,8 @@ El frontend consume la API del backend usando:
   - ⚠️ **Nota**: Existen páginas `ForgotPassword` y `ResetPassword` pero los endpoints del backend aún no están implementados
 - **Productos**: `/api/products/`, `/api/products/{slug}/`, `/api/products/categories/`
 - **Carrito**: `/api/cart/`, `/api/cart/add`, `/api/cart/items/{id}`, `/api/cart/items/{id}/delete`
-- **Pedidos**: `/api/checkout/mode`, `/api/checkout/create`, `/api/orders/`, `/api/orders/{id}/`
+- **Checkout**: `/api/checkout/mode`, `/api/checkout/shipping-quote`, `/api/checkout/create`
+- **Pedidos**: `/api/orders/`, `/api/orders/{id}/`
 - **Admin**: `/api/admin/products`, `/api/admin/orders`, `/api/admin/order-statuses`
 
 Ver `backend/README.md` para documentación completa de la API.
@@ -157,13 +160,23 @@ VITE_WEBPAY_ENABLED=false
 
 ## Notas
 
-- El carrito persiste en localStorage (usuarios logueados) o sessionStorage (invitados)
+- El carrito se sincroniza con el backend mediante `X-Session-Token`; el token se almacena en `localStorage` y se adjunta automáticamente en cada petición. Los datos temporales del paso `StepCustomer` para invitados se guardan en `sessionStorage`.
 - Envío gratis aplica cuando el subtotal >= CLP 50.000
 - Las rutas admin requieren rol `admin`
 - Los formularios usan React Hook Form para validación
-- Checkout: Invitados usan sessionStorage, usuarios logueados usan localStorage
+- Checkout: Invitados recorren un paso adicional (`StepCustomer`) antes de dirección y mantienen el mismo carrito mediante `X-Session-Token`.
 - Pago: Actualmente es placeholder (Webpay deshabilitado), preparado para integración futura
 - Password Reset: Las páginas `ForgotPassword` y `ResetPassword` están implementadas en el frontend pero los endpoints del backend aún no están disponibles (se muestran como placeholder)
+
+### Estados de pedido en la UI
+
+La página `Orders` muestra los estados entregados por el backend (`PENDING`, `PAID`, `FAILED`, `CANCELLED`, `PREPARING`, `SHIPPED`, `DELIVERED`) usando badges con colores consistentes:
+- `PENDING` / `PREPARING`: amarillo
+- `PAID` / `SHIPPED`: azul
+- `DELIVERED`: verde
+- `FAILED` / `CANCELLED`: rojo
+
+Además se renderiza la línea de tiempo del pedido a partir de `status_history` y se formatean fechas/monedas con los helpers de `utils/formatPrice` y `utils/dates`.
 
 ## Seguridad
 

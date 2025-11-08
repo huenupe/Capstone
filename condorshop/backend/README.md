@@ -134,6 +134,7 @@ backend/
 - `discount_amount` y `discount_price`: enteros (CLP)
 - Precedencia de cálculo: `final_price` > `amount` > `percent`
 - Todos los precios se manejan como enteros en pesos (sin decimales)
+- El campo `price` se almacena como `DecimalField` con dos decimales y DRF lo expone como string (ej: `"45990.00"`). Los campos calculados `final_price`, `discount_price`, `discount_amount` y `calculated_discount_percent` se devuelven como enteros en CLP para facilitar el formateo en frontend.
 
 ## 📡 Endpoints de la API
 
@@ -164,6 +165,13 @@ backend/
 }
 ```
 
+#### Endpoints pendientes
+
+- `/api/auth/forgot-password` *(pendiente)*  
+- `/api/auth/reset-password` *(pendiente)*  
+
+> El frontend expone las pantallas correspondientes pero el backend aún no implementa los endpoints. Se mantienen en backlog para una futura iteración.
+
 ### Productos (`/api/products/`)
 
 | Método | Endpoint | Descripción | Permisos |
@@ -179,25 +187,58 @@ backend/
 - `ordering`: Ordenar por (`price`, `-price`, `created_at`, `-created_at`)
 - `page`: Número de página (paginación)
 
+**Paginación:** La API utiliza `PageNumberPagination` con un `PAGE_SIZE` por defecto de **20** elementos. Las respuestas tienen la estructura:
+
+```json
+{
+  "count": 40,
+  "next": "http://localhost:8000/api/products/?page=3",
+  "previous": "http://localhost:8000/api/products/?page=1",
+  "results": [ /* productos */ ]
+}
+```
+
+Puedes solicitar un tamaño de página distinto con `page_size` (máximo 100).
+
+**Imágenes de productos:** El detalle `/api/products/{slug}/` incluye el arreglo `images` ordenado por `position` con los campos `id`, `url`, `image` (URL absoluta), `alt_text` y `position`. El listado expone `main_image` ya normalizado.
+
 ### Carrito (`/api/cart/`)
 
 | Método | Endpoint | Descripción | Permisos |
 |--------|----------|-------------|----------|
-| GET | `/api/cart/` | Ver carrito actual | `IsAuthenticatedOrReadOnly` |
-| POST | `/api/cart/add` | Agregar producto al carrito | `IsAuthenticatedOrReadOnly` |
-| PATCH | `/api/cart/items/{id}/` | Actualizar cantidad de item | `IsAuthenticatedOrReadOnly` |
-| DELETE | `/api/cart/items/{id}/delete` | Eliminar item del carrito | `IsAuthenticatedOrReadOnly` |
+| GET | `/api/cart/` | Ver carrito actual | `AllowAny` |
+| POST | `/api/cart/add` | Agregar producto al carrito | `AllowAny` |
+| PATCH | `/api/cart/items/{id}/` | Actualizar cantidad de item | `AllowAny` |
+| DELETE | `/api/cart/items/{id}/delete` | Eliminar item del carrito | `AllowAny` |
 
-**Nota:** Los usuarios no autenticados pueden usar el carrito con un `X-Session-Token` en los headers.
+**Flujo de invitados:** Si la petición llega sin autenticación, el backend genera automáticamente un `X-Session-Token`, lo devuelve en los headers de la respuesta y lo reutiliza para enlazar el carrito invitado entre solicitudes. El frontend solo debe reenviar ese header en peticiones subsecuentes; si el token no se entrega, el backend emitirá uno nuevo.
 
-### Pedidos (`/api/orders/` y `/api/checkout/`)
+**Handshake recomendado para invitados:**
+1. El frontend llama a `POST /api/cart/add` sin autenticarse.
+2. El backend responde con `X-Session-Token` y un carrito asociado.
+3. El frontend persiste ese token (por ejemplo en `localStorage`) y lo reenvía en todos los requests del carrito y el checkout.
+4. Si el invitado se autentica posteriormente, el carrito se fusionará al usuario en la siguiente interacción.
+
+### Checkout y Pedidos
+
+El módulo de órdenes expone los mismos endpoints bajo dos prefijos por conveniencia:
+- `/api/checkout/` pensado para el flujo público (clientes e invitados).
+- `/api/orders/` para historial y detalle de órdenes autenticadas.
+
+#### Checkout público (`/api/checkout/`)
 
 | Método | Endpoint | Descripción | Permisos |
 |--------|----------|-------------|----------|
-| GET | `/api/checkout/mode` | Información del modo de checkout | `IsAuthenticatedOrReadOnly` |
-| POST | `/api/checkout/create` | Crear pedido desde el carrito | `IsAuthenticatedOrReadOnly` |
-| GET | `/api/orders/` | Historial de pedidos del usuario | `IsAuthenticated` |
-| GET | `/api/orders/{id}/` | Detalle de un pedido | `IsAuthenticated` |
+| GET | `/api/checkout/mode` | Información del modo de checkout (detecta direcciones guardadas) | `IsAuthenticatedOrReadOnly` |
+| POST | `/api/checkout/shipping-quote` | Cotizar envío para una región y los ítems del carrito | `AllowAny` |
+| POST | `/api/checkout/create` *(alias de `/api/orders/create`)* | Crear pedido desde el carrito (clientes o invitados) | `AllowAny` |
+
+#### Historial autenticado (`/api/orders/`)
+
+| Método | Endpoint | Descripción | Permisos |
+|--------|----------|-------------|----------|
+| GET | `/api/orders/` | Historial de pedidos del usuario autenticado | `IsAuthenticated` |
+| GET | `/api/orders/{id}/` | Detalle de un pedido del usuario | `IsAuthenticated` |
 
 ### Panel de Administración (`/api/admin/`)
 
@@ -211,6 +252,16 @@ backend/
 | PATCH | `/api/admin/orders/{id}/status` | Cambiar estado de pedido (Body: `{ "status_id": 2, "note": "..." }`) | `IsAuthenticated` + `IsAdmin` |
 | GET | `/api/admin/orders/export` | Exportar pedidos a CSV (query params: `status`, `date_from`, `date_to`) | `IsAuthenticated` + `IsAdmin` |
 | GET | `/api/admin/order-statuses` | Lista de estados de pedido | `IsAuthenticated` + `IsAdmin` |
+
+## 📥 Formato de respuestas y errores
+
+- **Éxito (2xx):** Los endpoints retornan payloads JSON consistentes con los serializers correspondientes.
+- **Errores de validación (400):** Se devuelven como diccionario `{ "campo": ["mensaje"] }`.
+- **Errores de negocio (400/404):** Se normalizan en `{ "error": "mensaje descriptivo" }`.
+- **Autenticación (401) / Autorización (403):** `{ "detail": "Authentication credentials were not provided." }` conforme a DRF.
+- **Rate limiting (429):** `{ "detail": "Request was throttled." }`.
+
+Los encabezados relevantes (`X-Session-Token`, `Set-Cookie`, etc.) se exponen directamente; recuerda leer `X-Session-Token` cuando operes como invitado.
 
 ## 🔐 Autenticación JWT
 
