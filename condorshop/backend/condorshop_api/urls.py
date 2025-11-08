@@ -6,6 +6,9 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from django.http import JsonResponse, HttpResponse
+from django.utils import timezone
+from django.db import connection
+from django.db.utils import OperationalError
 
 # Personalizar el AdminSite
 admin.site.site_header = "CondorShop - Administración"
@@ -19,6 +22,7 @@ def api_root(request):
         'version': '1.0.0',
         'status': 'running',
         'endpoints': {
+            'health': '/health/',
             'admin': '/admin/',
             'auth': '/api/auth/',
             'users': '/api/users/',
@@ -46,9 +50,30 @@ def favicon_view(request):
     except FileNotFoundError:
         return HttpResponse(status=404)
 
+
+def health_check(request):
+    """Lightweight health-check endpoint for liveness/readiness probes."""
+    status_code = 200
+    checks = {}
+
+    try:
+        connection.ensure_connection()
+        checks['database'] = 'ok'
+    except OperationalError:
+        checks['database'] = 'error'
+        status_code = 503
+
+    payload = {
+        'status': 'ok' if status_code == 200 else 'unhealthy',
+        'checks': checks,
+        'timestamp': timezone.now().isoformat(),
+    }
+    return JsonResponse(payload, status=status_code)
+
 urlpatterns = [
     path('', api_root, name='api-root'),
     path('favicon.ico', favicon_view, name='favicon'),
+    path('health/', health_check, name='health-check'),
     path('admin/', admin.site.urls),
     path('api/auth/', include('apps.users.urls')),
     path('api/users/', include('apps.users.urls')),
