@@ -138,6 +138,10 @@ backend/
 
 ## 📡 Endpoints de la API
 
+### Versionado de la API
+
+Actualmente todos los endpoints viven bajo el prefijo `/api/` (sin número de versión). Para el lanzamiento en producción se recomienda introducir un prefijo `/api/v1/` y mantener este README actualizado cuando se realice el corte de versión.
+
 ### Autenticación (`/api/auth/`)
 
 | Método | Endpoint | Descripción | Permisos |
@@ -240,6 +244,12 @@ El módulo de órdenes expone los mismos endpoints bajo dos prefijos por conveni
 | GET | `/api/orders/` | Historial de pedidos del usuario autenticado | `IsAuthenticated` |
 | GET | `/api/orders/{id}/` | Detalle de un pedido del usuario | `IsAuthenticated` |
 
+#### Pagos / Webpay
+
+- El proyecto contempla Webpay como pasarela principal, pero la integración se mantiene en modo *placeholder*.  
+- Endpoints como `/api/payments/webpay/create` y `/api/payments/webpay/commit` aún no están implementados; cuando se habiliten se documentará el flujo completo (crear → redirigir al gateway → retornar → confirmar) junto con las variables `WEBPAY_*` necesarias en `.env`.
+++ End Patch
+
 ### Panel de Administración (`/api/admin/`)
 
 | Método | Endpoint | Descripción | Permisos |
@@ -256,10 +266,9 @@ El módulo de órdenes expone los mismos endpoints bajo dos prefijos por conveni
 ## 📥 Formato de respuestas y errores
 
 - **Éxito (2xx):** Los endpoints retornan payloads JSON consistentes con los serializers correspondientes.
-- **Errores de validación (400):** Se devuelven como diccionario `{ "campo": ["mensaje"] }`.
-- **Errores de negocio (400/404):** Se normalizan en `{ "error": "mensaje descriptivo" }`.
-- **Autenticación (401) / Autorización (403):** `{ "detail": "Authentication credentials were not provided." }` conforme a DRF.
-- **Rate limiting (429):** `{ "detail": "Request was throttled." }`.
+- **Errores de validación (400):** DRF responde como `{ "campo": ["mensaje"] }`.
+- **Errores de negocio (400/404):** Se devuelven como `{ "error": "mensaje descriptivo" }` (por ejemplo, `{"error": "Stock insuficiente"}`). Estamos migrando gradualmente a `detail`, pero este formato se mantiene para compatibilidad.
+- **Autenticación (401) / Autorización (403) / Rate limiting (429):** DRF responde con `{ "detail": "..." }` (por ejemplo, `{"detail": "Request was throttled."}`).
 
 Los encabezados relevantes (`X-Session-Token`, `Set-Cookie`, etc.) se exponen directamente; recuerda leer `X-Session-Token` cuando operes como invitado.
 
@@ -296,10 +305,10 @@ Content-Type: application/json
 
 ## 🛡️ Permisos
 
-- **`AllowAny`**: Acceso público (registro, login)
-- **`IsAuthenticatedOrReadOnly`**: Lectura pública, escritura requiere autenticación (productos, carrito)
-- **`IsAuthenticated`**: Requiere usuario autenticado (perfil, órdenes)
-- **`IsAdmin`**: Requiere rol admin (panel de administración)
+- **`AllowAny`**: Acceso público (registro, login, carrito y checkout para invitados)
+- **`IsAuthenticatedOrReadOnly`**: Lectura pública, escritura requiere autenticación (productos, reseñas públicas, etc.)
+- **`IsAuthenticated`**: Requiere usuario autenticado (perfil, historial de pedidos)
+- **`IsAdmin`**: Requiere rol admin (panel y endpoints administrativos)
 
 ## 🔒 Seguridad
 
@@ -317,9 +326,10 @@ El backend está configurado con las mejores prácticas de seguridad:
 
 ### CORS y CSRF
 
-- **CORS** permite solicitudes desde `http://localhost:5173` y `http://127.0.0.1:5173` por defecto
-- **CSRF_TRUSTED_ORIGINS** configurado para las mismas URLs
-- En producción, actualizar `CORS_ALLOWED_ORIGINS` y `CSRF_TRUSTED_ORIGINS` con las URLs reales
+- **CORS** permite solicitudes desde `http://localhost:5173` y `http://127.0.0.1:5173` por defecto. Si ejecutas el frontend en otro puerto u origen (ej. `http://localhost:5174` o un dominio custom) agrégalo explícitamente en `CORS_ALLOWED_ORIGINS`.
+- `CORS_EXPOSE_HEADERS` incluye `X-Session-Token` para que el frontend pueda leerlo y persistirlo. Si agregas más headers personalizados, expónlos aquí.
+- `CSRF_TRUSTED_ORIGINS` refleja el mismo listado de orígenes.
+- CSRF se mantiene activo para vistas basadas en formularios y el panel de administración. Las APIs REST que usan JWT en el header `Authorization` no requieren token CSRF adicional.
 
 ## 📊 Logging
 
@@ -425,4 +435,27 @@ SECURE_SSL_REDIRECT=True
 - ✅ El sistema soporta **carritos de invitados** (sin autenticación)
 - ✅ Los precios se fijan al momento de agregar al carrito
 - ✅ El envío es **gratis** para compras sobre $50,000 CLP
+
+### Rate limiting activo
+
+- `POST /api/auth/register`: 5 solicitudes por minuto (clave `ip`)
+- `POST /api/auth/login`: 5 solicitudes por minuto (clave `ip`)
+- `POST /api/auth/password-reset` y endpoints relacionados: 3 solicitudes por hora (clave `ip`)
+- `POST /api/checkout/shipping-quote`: 20 solicitudes por minuto (clave `ip`)
+- `POST /api/orders/create`: 10 solicitudes por hora (clave `user`)
+
+Estos límites mitigan fuerza bruta y abuso; ajusta las reglas `@ratelimit` si cambian los requisitos.
+
+### Healthcheck
+
+- **Endpoint:** `GET /health/`
+- **Checks:** realiza un `connection.ensure_connection()` contra la base de datos y retorna:
+  ```json
+  {
+    "status": "ok",
+    "checks": { "database": "ok" },
+    "timestamp": "2025-11-08T12:34:56.789123"
+  }
+  ```
+- Si la base de datos está inaccesible, responde con `503` y `"status": "unhealthy"`. Útil para probes de Kubernetes, load balancers o monitorización externa.
 
