@@ -446,6 +446,13 @@ SECURE_SSL_REDIRECT=True
 
 Estos límites mitigan fuerza bruta y abuso; ajusta las reglas `@ratelimit` si cambian los requisitos.
 
+### Comportamiento especial en desarrollo (`DEBUG=True`)
+
+- La raíz (`/`) redirige automáticamente a la pantalla de login del admin (`/admin/login/?next=/admin/`).
+- Al iniciar `runserver`, todas las sesiones de Django se invalidan para forzar reautenticación.
+- Las cookies de sesión expiran al cerrar el navegador o después de 30 minutos de inactividad.
+- En producción (`DEBUG=False`) se mantiene el comportamiento habitual del sitio público.
+
 ### Healthcheck
 
 - **Endpoint:** `GET /health/`

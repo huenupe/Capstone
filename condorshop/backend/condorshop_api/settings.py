@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'django_filters',
     # Local apps
+    'condorshop_api.apps.CondorShopAPIConfig',
     'apps.users',
     'apps.products',
     'apps.cart',
@@ -210,6 +211,11 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000  # 1 year
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+
+if DEBUG:
+    # Sessions en desarrollo: expiran al cerrar navegador o tras 30 minutos de inactividad
+    SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+    SESSION_COOKIE_AGE = env.int('DEV_SESSION_COOKIE_AGE', default=1800)
 
 # Email Configuration
 EMAIL_BACKEND = env('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')

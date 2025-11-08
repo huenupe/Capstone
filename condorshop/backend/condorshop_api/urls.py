@@ -2,21 +2,32 @@
 URL configuration for condorshop_api project.
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.contrib.auth.views import redirect_to_login
+from django.urls import path, include, reverse
 from django.conf import settings
 from django.conf.urls.static import static
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
 from django.db import connection
 from django.db.utils import OperationalError
+from django.views.decorators.cache import never_cache
 
 # Personalizar el AdminSite
 admin.site.site_header = "CondorShop - Administración"
 admin.site.site_title = "CondorShop - Administración"
 admin.site.index_title = "Panel de Administración"
 
+
+@never_cache
 def api_root(request):
-    """API root endpoint with available routes"""
+    """API root endpoint with available routes (redirige al admin en desarrollo)."""
+    if settings.DEBUG:
+        login_url = reverse('admin:login')
+        response = redirect_to_login('/admin/', login_url=login_url)
+        response['Cache-Control'] = 'no-store, max-age=0'
+        response['Pragma'] = 'no-cache'
+        return response
+
     return JsonResponse({
         'name': 'CondorShop API',
         'version': '1.0.0',
