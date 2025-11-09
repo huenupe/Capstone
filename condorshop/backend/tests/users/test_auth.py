@@ -1,5 +1,9 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.core import mail
+from django.utils import timezone
+
+from apps.users.models import PasswordResetToken
 
 
 @pytest.mark.django_db
@@ -50,5 +54,56 @@ def test_login_rejects_invalid_credentials(api_client, user):
 
     assert response.status_code == 401
     assert response.json()["error"] == "Credenciales inválidas"
+
+
+@pytest.mark.django_db
+def test_forgot_password_creates_token_and_sends_email(api_client, user, settings):
+    settings.EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
+
+    response = api_client.post(
+        "/api/auth/forgot-password",
+        {"email": user.email},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Si el email existe, recibirás instrucciones"
+    assert mail.outbox  # Se envió correo
+
+    token = PasswordResetToken.objects.filter(user=user).latest("created_at")
+    assert token.is_valid()
+    assert str(token.token) in mail.outbox[0].body
+
+
+@pytest.mark.django_db
+def test_reset_password_with_valid_token(api_client, user):
+    token = PasswordResetToken.objects.create(user=user)
+
+    response = api_client.post(
+        "/api/auth/reset-password",
+        {
+            "token": str(token.token),
+            "password": "NuevaClave123!",
+            "password_confirm": "NuevaClave123!",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Contraseña actualizada correctamente"
+
+    user.refresh_from_db()
+    assert user.check_password("NuevaClave123!")
+
+    token.refresh_from_db()
+    assert token.used_at is not None
+    assert token.used_at <= timezone.now()
+
+
+@pytest.mark.django_db
+def test_verify_reset_token_invalid(api_client):
+    response = api_client.get("/api/auth/verify-reset-token/00000000-0000-0000-0000-000000000000/")
+    assert response.status_code == 400
+    assert response.json()["error"] == "Token inválido o expirado"
 
 

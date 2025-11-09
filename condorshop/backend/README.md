@@ -150,6 +150,9 @@ Actualmente todos los endpoints viven bajo el prefijo `/api/` (sin número de ve
 | POST | `/api/auth/login` | Login de usuario (retorna JWT) | `AllowAny` |
 | POST | `/api/auth/token/` | Obtener token JWT (SimpleJWT) | `AllowAny` |
 | POST | `/api/auth/token/refresh/` | Refrescar token JWT | `AllowAny` |
+| POST | `/api/auth/forgot-password` | Solicitar recuperación de contraseña (siempre responde 200) | `AllowAny` |
+| POST | `/api/auth/reset-password` | Restablecer contraseña con un token válido | `AllowAny` |
+| GET | `/api/auth/verify-reset-token/{token}/` | Verificar si el token es válido antes de mostrar el formulario | `AllowAny` |
 | GET/PATCH | `/api/users/profile` | Ver/editar perfil de usuario | `IsAuthenticated` |
 
 **Ejemplo de respuesta de login:**
@@ -169,12 +172,11 @@ Actualmente todos los endpoints viven bajo el prefijo `/api/` (sin número de ve
 }
 ```
 
-#### Endpoints pendientes
+#### Recuperación de contraseña
 
-- `/api/auth/forgot-password` *(pendiente)*  
-- `/api/auth/reset-password` *(pendiente)*  
-
-> El frontend expone las pantallas correspondientes pero el backend aún no implementa los endpoints. Se mantienen en backlog para una futura iteración.
+- Los tokens expiran según `PASSWORD_RESET_TIMEOUT_HOURS` (por defecto, 1 hora).
+- El enlace enviado apunta al frontend (`FRONTEND_RESET_URL`) e incluye el token como querystring.
+- Las solicitudes y confirmaciones quedan registradas en auditoría cuando el módulo está disponible.
 
 ### Productos (`/api/products/`)
 

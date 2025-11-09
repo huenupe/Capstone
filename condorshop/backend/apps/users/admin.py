@@ -65,38 +65,37 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(PasswordResetToken)
 class PasswordResetTokenAdmin(admin.ModelAdmin):
-    list_display = ('user', 'token', 'created_at', 'expires_at', 'used', 'is_valid')
-    list_filter = ('used', 'created_at', 'expires_at')
+    list_display = ('user_email', 'token_value', 'created_at_display', 'expires_at_display', 'used_at_display', 'is_valid')
+    list_filter = ('created_at', 'expires_at', 'used_at')
     search_fields = ('user__email', 'token')
-    readonly_fields = ('token', 'created_at', 'expires_at')
+    readonly_fields = ('token', 'created_at', 'expires_at', 'used_at')
     ordering = ('-created_at',)
-    
-    def user(self, obj):
+
+    def user_email(self, obj):
         return obj.user.email if obj.user else '-'
-    user.short_description = 'Usuario'
-    user.admin_order_field = 'user__email'
-    
-    def token(self, obj):
-        return obj.token[:20] + '...' if obj.token and len(obj.token) > 20 else obj.token
-    token.short_description = 'Token'
-    token.admin_order_field = 'token'
-    
-    def created_at(self, obj):
-        return obj.created_at.strftime('%d de %B de %Y a las %H:%M') if obj.created_at else '-'
-    created_at.short_description = 'Creado el'
-    created_at.admin_order_field = 'created_at'
-    
-    def expires_at(self, obj):
-        return obj.expires_at.strftime('%d de %B de %Y a las %H:%M') if obj.expires_at else '-'
-    expires_at.short_description = 'Expira el'
-    expires_at.admin_order_field = 'expires_at'
-    
-    def used(self, obj):
-        return obj.used
-    used.short_description = 'Usado'
-    used.boolean = True
-    used.admin_order_field = 'used'
-    
+    user_email.short_description = 'Usuario'
+    user_email.admin_order_field = 'user__email'
+
+    def token_value(self, obj):
+        return str(obj.token)
+    token_value.short_description = 'Token'
+    token_value.admin_order_field = 'token'
+
+    def created_at_display(self, obj):
+        return obj.created_at.strftime('%d de %B de %Y %H:%M') if obj.created_at else '-'
+    created_at_display.short_description = 'Creado el'
+    created_at_display.admin_order_field = 'created_at'
+
+    def expires_at_display(self, obj):
+        return obj.expires_at.strftime('%d de %B de %Y %H:%M') if obj.expires_at else '-'
+    expires_at_display.short_description = 'Expira el'
+    expires_at_display.admin_order_field = 'expires_at'
+
+    def used_at_display(self, obj):
+        return obj.used_at.strftime('%d de %B de %Y %H:%M') if obj.used_at else '-'
+    used_at_display.short_description = 'Usado el'
+    used_at_display.admin_order_field = 'used_at'
+
     def is_valid(self, obj):
         return obj.is_valid()
     is_valid.boolean = True

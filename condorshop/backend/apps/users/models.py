@@ -1,6 +1,11 @@
-from django.db import models
+import uuid
+from datetime import timedelta
+
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.validators import EmailValidator
+from django.db import models
+from django.utils import timezone
 
 
 class UserManager(BaseUserManager):
@@ -75,6 +80,11 @@ class User(AbstractUser):
         return self.role == 'admin'
 
 
+def _default_reset_expiration():
+    timeout_hours = getattr(settings, 'PASSWORD_RESET_TIMEOUT_HOURS', 1)
+    return timezone.now() + timedelta(hours=timeout_hours)
+
+
 class PasswordResetToken(models.Model):
     """Token para recuperación de contraseña"""
     user = models.ForeignKey(
@@ -84,10 +94,16 @@ class PasswordResetToken(models.Model):
         related_name='password_reset_tokens',
         verbose_name='Usuario'
     )
-    token = models.CharField(max_length=64, unique=True, db_column='token', verbose_name='Token')
+    token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        db_column='token',
+        verbose_name='Token'
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el')
-    expires_at = models.DateTimeField(db_column='expires_at', verbose_name='Expira el')
-    used = models.BooleanField(default=False, db_column='used', verbose_name='Usado')
+    expires_at = models.DateTimeField(default=_default_reset_expiration, db_column='expires_at', verbose_name='Expira el')
+    used_at = models.DateTimeField(null=True, blank=True, db_column='used_at', verbose_name='Usado el')
 
     class Meta:
         db_table = 'password_reset_tokens'
@@ -95,16 +111,19 @@ class PasswordResetToken(models.Model):
         verbose_name_plural = 'Tokens de Restablecimiento de Contraseña'
         indexes = [
             models.Index(fields=['token'], name='idx_reset_token'),
-            models.Index(fields=['user', 'used'], name='idx_reset_user_used'),
+            models.Index(fields=['expires_at'], name='idx_reset_expires'),
         ]
 
     def __str__(self):
-        return f"Token para {self.user.email}"
+        return f"Token {self.token} para {self.user.email}"
 
     def is_valid(self):
         """Verifica si el token es válido y no ha expirado"""
-        from django.utils import timezone
-        return not self.used and timezone.now() < self.expires_at
+        return self.used_at is None and timezone.now() < self.expires_at
+
+    def mark_used(self):
+        self.used_at = timezone.now()
+        self.save(update_fields=['used_at'])
 
 
 class Address(models.Model):

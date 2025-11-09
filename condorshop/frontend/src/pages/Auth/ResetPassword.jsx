@@ -12,6 +12,7 @@ const ResetPassword = () => {
   const [searchParams] = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
+  const [apiError, setApiError] = useState(null)
   const token = searchParams.get('token')
   
   const {
@@ -31,10 +32,12 @@ const ResetPassword = () => {
 
   const onSubmit = async (data) => {
     setLoading(true)
+    setApiError(null)
     try {
       await authService.confirmPasswordReset({
         token,
-        new_password: data.password,
+        password: data.password,
+        passwordConfirm: data.confirmPassword,
       })
       
       setSuccess(true)
@@ -45,7 +48,11 @@ const ResetPassword = () => {
       }, 2000)
     } catch (error) {
       console.error('Error resetting password:', error)
-      // El error se mostrará en el formulario si es de validación
+      const backendMessage =
+        error?.response?.data?.error ||
+        error?.response?.data?.detail ||
+        'No fue posible actualizar la contraseña. Intenta nuevamente.'
+      setApiError(backendMessage)
     } finally {
       setLoading(false)
     }
@@ -109,7 +116,7 @@ const ResetPassword = () => {
                 required: 'Confirma tu contraseña',
                 validate: validatePasswordMatch(password),
               }}
-              error={errors.confirmPassword?.message}
+              error={errors.confirmPassword?.message || apiError}
               placeholder="Confirma tu nueva contraseña"
               autoComplete="new-password"
             />

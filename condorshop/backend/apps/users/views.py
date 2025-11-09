@@ -1,5 +1,5 @@
-import secrets
-from datetime import timedelta
+import logging
+import uuid
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -8,6 +8,8 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.conf import settings
 from django.core.mail import send_mail
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.contrib.auth.password_validation import validate_password
 from django_ratelimit.decorators import ratelimit
 from rest_framework_simplejwt.tokens import RefreshToken
 from .serializers import UserRegistrationSerializer, UserProfileSerializer, AddressSerializer, AddressCreateSerializer
@@ -21,6 +23,9 @@ except ImportError:
     TOKEN_BLACKLIST_AVAILABLE = False
 
 User = get_user_model()
+
+FRONTEND_RESET_URL = getattr(settings, 'FRONTEND_RESET_URL', 'http://localhost:5173/reset-password')
+PASSWORD_RESET_TIMEOUT_HOURS = getattr(settings, 'PASSWORD_RESET_TIMEOUT_HOURS', 1)
 
 
 @api_view(['POST'])
@@ -145,89 +150,69 @@ def profile(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
-@ratelimit(key='ip', rate='3/h', method='POST')
+@ratelimit(key='ip', rate='3/h', method='POST', block=True)
 def forgot_password(request):
     """
-    Solicitar recuperación de contraseña
-    POST /api/auth/password-reset
+    Solicitar recuperación de contraseña.
+    POST /api/auth/forgot-password
     Body: { "email": "..." }
-    Siempre retorna 204 (no revelar si email existe)
+    Siempre retorna 200 sin revelar si el email existe.
     """
     email = request.data.get('email')
-    
+
     if not email:
-        return Response(
-            {'error': 'El email es requerido'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    try:
-        user = User.objects.get(email=email, is_active=True)
-        
-        # Generar token seguro
-        token = secrets.token_urlsafe(32)
-        expires_at = timezone.now() + timedelta(hours=1)
-        
-        # Invalidar tokens anteriores del usuario
-        PasswordResetToken.objects.filter(user=user, used=False).update(used=True)
-        
+        return Response({'error': 'El email es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.filter(email=email, is_active=True).first()
+
+    if user:
+        # Invalidar tokens previos pendientes
+        PasswordResetToken.objects.filter(user=user, used_at__isnull=True).update(used_at=timezone.now())
+
         # Crear nuevo token
-        reset_token = PasswordResetToken.objects.create(
-            user=user,
-            token=token,
-            expires_at=expires_at
+        reset_token = PasswordResetToken.objects.create(user=user)
+        reset_url = f"{FRONTEND_RESET_URL}?token={reset_token.token}"
+
+        message = (
+            f"Hola {user.first_name or user.email},\n\n"
+            "Recibimos una solicitud para restablecer tu contraseña en CondorShop.\n\n"
+            f"Utiliza el siguiente enlace para crear una nueva contraseña (vigente por {PASSWORD_RESET_TIMEOUT_HOURS} hora(s)):\n"
+            f"{reset_url}\n\n"
+            "Si no solicitaste este cambio, puedes ignorar este mensaje.\n\n"
+            "Saludos cordiales,\n"
+            "Equipo CondorShop"
         )
-        
-        # Construir URL de reset (frontend URL desde settings o request)
-        frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173')
-        reset_url = f"{frontend_url}/reset-password?token={token}"
-        
-        # Enviar email
+
         try:
             send_mail(
-                subject='Recuperación de contraseña - CondorShop',
-                message=f'''
-Hola {user.first_name or user.email},
-
-Has solicitado restablecer tu contraseña en CondorShop.
-
-Haz clic en el siguiente enlace para crear una nueva contraseña:
-{reset_url}
-
-Este enlace expirará en 1 hora.
-
-Si no solicitaste este cambio, puedes ignorar este mensaje.
-
-Saludos,
-Equipo CondorShop
-                ''',
+                subject='Recuperar contraseña - CondorShop',
+                message=message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[user.email],
                 fail_silently=False,
             )
-        except Exception as e:
-            # Log error pero no fallar (para no revelar si email existe)
-            import logging
+        except Exception as exc:
             logger = logging.getLogger(__name__)
-            logger.error(f'Error sending password reset email: {e}')
-        
-        # Registrar en auditoría
+            logger.error("Error enviando correo de recuperación: %s", exc)
+
+        # Registrar auditoría (best-effort)
         try:
             from apps.audit.models import AuditLog
             AuditLog.objects.create(
-                action='PASSWORD_RESET_REQUESTED',
                 user=user,
-                details=f'Password reset requested for {user.email}'
+                action='PASSWORD_RESET_REQUEST',
+                table_name='users',
+                record_id=user.id,
+                new_values={'email': user.email},
+                ip_address=request.META.get('REMOTE_ADDR')
             )
         except Exception:
-            pass  # No fallar si auditoría no está disponible
-        
-    except User.DoesNotExist:
-        # No hacer nada, pero no revelar que el email no existe
-        pass
-    
-    # Siempre retornar 204 (éxito) para no revelar si email existe
-    return Response(status=status.HTTP_204_NO_CONTENT)
+            pass
+
+    return Response(
+        {'message': 'Si el email existe, recibirás instrucciones'},
+        status=status.HTTP_200_OK
+    )
 
 
 @api_view(['GET', 'POST'])
@@ -302,58 +287,54 @@ def address_detail(request, address_id):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
-@ratelimit(key='ip', rate='5/h', method='POST')
+@ratelimit(key='ip', rate='5/h', method='POST', block=True)
 def reset_password(request):
     """
-    Confirmar recuperación de contraseña con token
-    POST /api/auth/password-reset/confirm
-    Body: { "token": "...", "new_password": "..." }
+    Restablecer contraseña usando un token válido.
+    POST /api/auth/reset-password
+    Body: { "token": "...", "password": "...", "password_confirm": "..." }
     """
-    token = request.data.get('token')
-    new_password = request.data.get('new_password')
-    
-    if not token or not new_password:
+    token_value = request.data.get('token')
+    password = request.data.get('password')
+    password_confirm = request.data.get('password_confirm')
+
+    if not token_value or not password or not password_confirm:
         return Response(
-            {'error': 'Token y nueva contraseña son requeridos'},
+            {'error': 'Token, contraseña y confirmación son requeridos'},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
+    if password != password_confirm:
+        return Response(
+            {'error': 'Las contraseñas no coinciden'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     try:
-        reset_token = PasswordResetToken.objects.get(token=token)
-    except PasswordResetToken.DoesNotExist:
-        return Response(
-            {'error': 'Token inválido o expirado'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # Validar token
-    if not reset_token.is_valid():
-        return Response(
-            {'error': 'Token inválido o expirado'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # Validar contraseña
-    from django.contrib.auth.password_validation import validate_password
-    from django.core.exceptions import ValidationError
-    try:
-        validate_password(new_password, reset_token.user)
-    except ValidationError as e:
-        return Response(
-            {'error': '; '.join(e.messages)},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # Actualizar contraseña
+        token_uuid = uuid.UUID(str(token_value))
+    except (TypeError, ValueError):
+        return Response({'error': 'Token inválido'}, status=status.HTTP_400_BAD_REQUEST)
+
+    reset_token = PasswordResetToken.objects.select_related('user').filter(token=token_uuid).first()
+    if not reset_token or not reset_token.is_valid():
+        return Response({'error': 'Token inválido o expirado'}, status=status.HTTP_400_BAD_REQUEST)
+
     user = reset_token.user
-    user.set_password(new_password)
-    user.save()
-    
-    # Marcar token como usado
-    reset_token.used = True
-    reset_token.save()
-    
-    # Invalidar todos los tokens JWT del usuario
+
+    try:
+        validate_password(password, user)
+    except DjangoValidationError as exc:
+        return Response({'error': '; '.join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+    user.set_password(password)
+    user.save(update_fields=['password', 'updated_at'])
+
+    reset_token.used_at = timezone.now()
+    reset_token.save(update_fields=['used_at'])
+
+    # Invalidar otros tokens activos
+    PasswordResetToken.objects.filter(user=user, used_at__isnull=True).exclude(id=reset_token.id).update(used_at=timezone.now())
+
     if TOKEN_BLACKLIST_AVAILABLE:
         try:
             outstanding_tokens = OutstandingToken.objects.filter(user=user)
@@ -361,19 +342,40 @@ def reset_password(request):
                 BlacklistedToken.objects.get_or_create(token=outstanding_token)
         except Exception:
             pass
-    
-    # Registrar en auditoría
+
     try:
         from apps.audit.models import AuditLog
         AuditLog.objects.create(
-            action='PASSWORD_RESET_COMPLETED',
             user=user,
-            details=f'Password reset completed for {user.email}'
+            action='PASSWORD_RESET_COMPLETED',
+            table_name='users',
+            record_id=user.id,
+            new_values={'email': user.email},
+            ip_address=request.META.get('REMOTE_ADDR')
         )
     except Exception:
         pass
-    
-    return Response(status=status.HTTP_204_NO_CONTENT)
+
+    return Response({'message': 'Contraseña actualizada correctamente'}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def verify_reset_token(request, token):
+    """
+    Verificar si un token de recuperación es válido.
+    GET /api/auth/verify-reset-token/<token>/
+    """
+    try:
+        token_uuid = uuid.UUID(str(token))
+    except (TypeError, ValueError):
+        return Response({'error': 'Token inválido'}, status=status.HTTP_400_BAD_REQUEST)
+
+    reset_token = PasswordResetToken.objects.filter(token=token_uuid).first()
+    if not reset_token or not reset_token.is_valid():
+        return Response({'error': 'Token inválido o expirado'}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({'message': 'Token válido'}, status=status.HTTP_200_OK)
 
 
 @api_view(['DELETE'])

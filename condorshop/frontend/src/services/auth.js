@@ -52,15 +52,19 @@ export const authService = {
    * @param {string} email - Email del usuario
    */
   requestPasswordReset: async (email) => {
-    await apiClient.post('/auth/password-reset', { email })
+    await apiClient.post('/auth/forgot-password', { email })
   },
 
   /**
    * Confirmar recuperación de contraseña con token
    * @param {Object} data - { token, new_password }
    */
-  confirmPasswordReset: async (data) => {
-    await apiClient.post('/auth/password-reset/confirm', data)
+  confirmPasswordReset: async ({ token, password, passwordConfirm }) => {
+    await apiClient.post('/auth/reset-password', {
+      token,
+      password,
+      password_confirm: passwordConfirm ?? password,
+    })
   },
 
   /**
