@@ -65,12 +65,15 @@ def shipping_quote(request):
         except Product.DoesNotExist:
             continue
     
+    if len(items_for_calc) != len(cart_items_data):
+        return Response({'error': 'Datos de carrito inválidos'}, status=status.HTTP_400_BAD_REQUEST)
+
     # Calculate subtotal if not provided
     if not subtotal and items_for_calc:
-        subtotal = sum(
-            item.product.price * item_data.get('quantity', 1)
-            for item, item_data in zip(items_for_calc, cart_items_data)
-        )
+        subtotal = 0
+        for item_data, calc in zip(cart_items_data, items_for_calc):
+            quantity = item_data.get('quantity', 1)
+            subtotal += calc.product.price * quantity
     
     quote = get_shipping_quote(region, subtotal, items_for_calc)
     return Response(quote)
@@ -146,21 +149,36 @@ def create_order(request):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-    cart_items = cart.items.select_related('product').all()
-    if not cart_items.exists():
+    cart_items_qs = cart.items.select_related('product').all()
+    if not cart_items_qs.exists():
         return Response(
             {'error': 'El carrito está vacío'},
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # Validar stock y bloquear filas
+    cart_items = list(cart_items_qs)
     products_to_update = []
-    items_data = []
-    
+    item_payloads = []
+    subtotal = 0
+
+    product_ids = [item.product_id for item in cart_items]
+    products_map = {
+        product.id: product
+        for product in Product.objects.select_for_update().filter(id__in=product_ids)
+    }
+
+    if len(products_map) != len(product_ids):
+        missing = sorted(set(product_ids) - set(products_map.keys()))
+        return Response(
+            {
+                'error': 'Algunos productos del carrito no están disponibles',
+                'missing_product_ids': missing,
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
     for cart_item in cart_items:
-        # Bloquear la fila del producto para lectura con SELECT FOR UPDATE
-        product = Product.objects.select_for_update().get(id=cart_item.product.id)
-        
+        product = products_map[cart_item.product_id]
         if product.stock_qty < cart_item.quantity:
             return Response(
                 {
@@ -171,22 +189,23 @@ def create_order(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Preparar para actualizar stock
         product.stock_qty -= cart_item.quantity
         products_to_update.append(product)
-        
-        # Preparar datos del item
-        items_data.append({
+
+        unit_price = int(product.final_price)
+        quantity = int(cart_item.quantity)
+        total_price = unit_price * quantity
+        subtotal += total_price
+
+        item_payloads.append({
             'product': product,
-            'quantity': cart_item.quantity,
-            'unit_price': cart_item.unit_price,
-            'total_price': cart_item.quantity * cart_item.unit_price
+            'quantity': quantity,
+            'unit_price': unit_price,
+            'total_price': total_price,
         })
 
-    # Calcular totales
-    subtotal = sum(item['total_price'] for item in items_data)
     shipping_region = serializer.validated_data.get('shipping_region', '')
-    shipping_cost = calculate_shipping_cost(subtotal, shipping_region, cart_items)
+    shipping_cost = int(calculate_shipping_cost(subtotal, shipping_region, cart_items))
     total_amount = subtotal + shipping_cost
 
     # Obtener estado PENDING
@@ -203,16 +222,17 @@ def create_order(request):
     )
 
     # Crear items de la orden
-    order_items = []
-    for item_data in items_data:
-        order_item = OrderItem.objects.create(
+    order_items = [
+        OrderItem(
             order=order,
-            product=item_data['product'],
-            quantity=item_data['quantity'],
-            unit_price=item_data['unit_price'],
-            total_price=item_data['total_price']
+            product=payload['product'],
+            quantity=payload['quantity'],
+            unit_price=payload['unit_price'],
+            total_price=payload['total_price'],
         )
-        order_items.append(order_item)
+        for payload in item_payloads
+    ]
+    OrderItem.objects.bulk_create(order_items)
 
     # Actualizar stock de productos
     for product in products_to_update:

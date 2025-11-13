@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import Button from '../common/Button'
 import Spinner from '../common/Spinner'
@@ -15,11 +15,7 @@ const ProductRail = ({ title, params = {} }) => {
   const { setCart } = useCartStore()
   const toast = useToast()
 
-  useEffect(() => {
-    loadProducts()
-  }, [])
-
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
     setLoading(true)
     try {
       const data = await productsService.getProducts({
@@ -33,7 +29,11 @@ const ProductRail = ({ title, params = {} }) => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [params, title])
+
+  useEffect(() => {
+    loadProducts()
+  }, [loadProducts])
 
   const handleAddToCart = async (product) => {
     if (product.stock_qty === 0) {

@@ -1,5 +1,3 @@
-import decimal
-
 import factory
 from django.contrib.auth import get_user_model
 
@@ -16,6 +14,7 @@ class UserFactory(factory.django.DjangoModelFactory):
 
     class Meta:
         model = get_user_model()
+        skip_postgeneration_save = True
 
     @factory.post_generation
     def password(self, create, extracted, **kwargs):
@@ -38,7 +37,7 @@ class ProductFactory(factory.django.DjangoModelFactory):
     category = factory.SubFactory(CategoryFactory)
     name = factory.Sequence(lambda n: f"Product {n}")
     slug = factory.Sequence(lambda n: f"product-{n}")
-    price = decimal.Decimal("19990.00")
+    price = 19990
     stock_qty = 10
     sku = factory.Sequence(lambda n: f"SKU{n:05d}")
     active = True
@@ -69,6 +68,7 @@ class CartItemFactory(factory.django.DjangoModelFactory):
     product = factory.SubFactory(ProductFactory)
     quantity = 1
     unit_price = factory.LazyAttribute(lambda obj: obj.product.final_price)
+    total_price = factory.LazyAttribute(lambda obj: obj.unit_price * obj.quantity)
 
     class Meta:
         model = CartItem

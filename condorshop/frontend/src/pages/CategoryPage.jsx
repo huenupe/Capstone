@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { getProductImage } from '../utils/getProductImage'
 import Button from '../components/common/Button'
@@ -63,32 +63,24 @@ const ProductCardWithCart = ({ product, onAddToCart }) => {
 const CategoryPage = () => {
   const { slug } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
+  const querySyncRef = useRef(searchParams.toString())
   const [category, setCategory] = useState(null)
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [pagination, setPagination] = useState({})
   const { setCart } = useCartStore()
   const toast = useToast()
+  const toastRef = useRef(toast)
 
   // Filters
   const [search, setSearch] = useState(searchParams.get('search') || '')
-  const [minPrice, setMinPrice] = useState(searchParams.get('min_price') || '')
-  const [maxPrice, setMaxPrice] = useState(searchParams.get('max_price') || '')
+  const [minPrice, setMinPrice] = useState(searchParams.get('min_price') ?? '')
+  const [maxPrice, setMaxPrice] = useState(searchParams.get('max_price') ?? '')
   const [ordering, setOrdering] = useState(searchParams.get('ordering') || '')
   const [page, setPage] = useState(parseInt(searchParams.get('page')) || 1)
   const pageSize = 12
 
-  useEffect(() => {
-    loadCategory()
-  }, [slug])
-
-  useEffect(() => {
-    if (category) {
-      loadProducts()
-    }
-  }, [page, search, minPrice, maxPrice, ordering, category])
-
-  const loadCategory = async () => {
+  const loadCategory = useCallback(async () => {
     try {
       const data = await categoriesService.getCategoryBySlug(slug)
       if (data) {
@@ -96,8 +88,8 @@ const CategoryPage = () => {
       } else {
         // Try to find in full list
         const allCategories = await categoriesService.getCategories()
-        const catList = Array.isArray(allCategories) 
-          ? allCategories 
+        const catList = Array.isArray(allCategories)
+          ? allCategories
           : allCategories.results || []
         const found = catList.find(cat => cat.slug === slug)
         setCategory(found || null)
@@ -105,9 +97,13 @@ const CategoryPage = () => {
     } catch (error) {
       console.error('Error loading category:', error)
     }
-  }
+  }, [slug])
 
-  const loadProducts = async () => {
+  useEffect(() => {
+    loadCategory()
+  }, [loadCategory])
+
+  const loadProducts = useCallback(async () => {
     setLoading(true)
     try {
       const params = {
@@ -117,8 +113,8 @@ const CategoryPage = () => {
       }
 
       if (search) params.search = search
-      if (minPrice) params.min_price = minPrice
-      if (maxPrice) params.max_price = maxPrice
+      if (minPrice !== '') params.min_price = minPrice
+      if (maxPrice !== '') params.max_price = maxPrice
       if (ordering) params.ordering = ordering
 
       const data = await productsService.getProducts(params)
@@ -130,31 +126,97 @@ const CategoryPage = () => {
         totalPages: Math.ceil((data.count || 0) / pageSize),
       })
 
-      // Update URL params
-      const newParams = new URLSearchParams()
-      Object.keys(params).forEach((key) => {
-        if (params[key] && key !== 'category') {
-          newParams.set(key, params[key])
-        }
-      })
-      setSearchParams(newParams)
     } catch (error) {
-      toast.error('Error al cargar productos')
+      toastRef.current?.error?.('Error al cargar productos')
       console.error('Error loading products:', error)
     } finally {
       setLoading(false)
     }
-  }
+  }, [category?.id, slug, page, pageSize, search, minPrice, maxPrice, ordering])
+
+  useEffect(() => {
+    if (category) {
+      loadProducts()
+    }
+  }, [category, loadProducts])
+
+  const urlFilters = useMemo(() => ({
+    page: parseInt(searchParams.get('page')) || 1,
+    search: searchParams.get('search') || '',
+    minPrice: searchParams.get('min_price') ?? '',
+    maxPrice: searchParams.get('max_price') ?? '',
+    ordering: searchParams.get('ordering') || '',
+  }), [searchParams])
+
+  // Sincronizar estado cuando la URL cambie externamente (navegación, back/forward)
+  const isFirstSync = useRef(true)
+
+  useEffect(() => {
+    if (urlFilters.page !== page) {
+      setPage(urlFilters.page)
+    }
+
+    if (urlFilters.search !== search) {
+      setSearch(urlFilters.search)
+    }
+
+    if (urlFilters.minPrice !== minPrice) {
+      setMinPrice(urlFilters.minPrice)
+    }
+
+    if (urlFilters.maxPrice !== maxPrice) {
+      setMaxPrice(urlFilters.maxPrice)
+    }
+
+    if (urlFilters.ordering !== ordering) {
+      setOrdering(urlFilters.ordering)
+    }
+
+    querySyncRef.current = searchParams.toString()
+  }, [urlFilters, page, search, minPrice, maxPrice, ordering, searchParams])
+
+  useEffect(() => {
+    toastRef.current = toast
+  }, [toast])
+
+  // Actualizar los parámetros de la URL cuando cambien los filtros / página
+  useEffect(() => {
+    if (isFirstSync.current) {
+      isFirstSync.current = false
+      querySyncRef.current = searchParams.toString()
+      return
+    }
+
+    const params = new URLSearchParams()
+    params.set('page', page.toString())
+    params.set('page_size', pageSize.toString())
+    if (search) {
+      params.set('search', search)
+    }
+    if (minPrice !== '') {
+      params.set('min_price', minPrice)
+    }
+    if (maxPrice !== '') {
+      params.set('max_price', maxPrice)
+    }
+    if (ordering) {
+      params.set('ordering', ordering)
+    }
+
+    const serialized = params.toString()
+    if (querySyncRef.current !== serialized) {
+      querySyncRef.current = serialized
+      setSearchParams(params, { replace: true })
+    }
+  }, [page, pageSize, search, minPrice, maxPrice, ordering, setSearchParams, searchParams])
 
   const handleSearch = (e) => {
     e.preventDefault()
     setPage(1)
-    loadProducts()
   }
 
   const handleFilterChange = () => {
     setPage(1)
-    loadProducts()
   }
 
   const handleAddToCart = async (product, quantity = 1) => {

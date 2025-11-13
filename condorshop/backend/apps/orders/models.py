@@ -1,7 +1,6 @@
 from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator
-from decimal import Decimal
 from apps.products.models import Product, Category
 
 
@@ -44,10 +43,8 @@ class Order(models.Model):
     shipping_city = models.CharField(max_length=100, db_column='shipping_city', verbose_name='Ciudad de envío')
     shipping_region = models.CharField(max_length=100, db_column='shipping_region', verbose_name='Región de envío')
     shipping_postal_code = models.CharField(max_length=20, null=True, blank=True, db_column='shipping_postal_code', verbose_name='Código postal de envío')
-    total_amount = models.DecimalField(max_digits=10, decimal_places=2, db_column='total_amount', verbose_name='Monto total')
-    shipping_cost = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+    total_amount = models.PositiveIntegerField(db_column='total_amount', verbose_name='Monto total')
+    shipping_cost = models.PositiveIntegerField(
         default=0,
         db_column='shipping_cost',
         verbose_name='Costo de envío'
@@ -65,6 +62,7 @@ class Order(models.Model):
             models.Index(fields=['status'], name='idx_orders_status'),
             models.Index(fields=['created_at'], name='idx_orders_created'),
             models.Index(fields=['user', 'created_at'], name='idx_orders_user_created'),
+            models.Index(fields=['customer_email'], name='idx_order_customer_email'),
         ]
 
     def __str__(self):
@@ -88,8 +86,8 @@ class OrderItem(models.Model):
         verbose_name='Producto'
     )
     quantity = models.PositiveIntegerField(db_column='quantity', verbose_name='Cantidad')
-    unit_price = models.DecimalField(max_digits=10, decimal_places=2, db_column='unit_price', verbose_name='Precio unitario')
-    total_price = models.DecimalField(max_digits=10, decimal_places=2, db_column='total_price', verbose_name='Precio total')
+    unit_price = models.PositiveIntegerField(db_column='unit_price', verbose_name='Precio unitario')
+    total_price = models.PositiveIntegerField(db_column='total_price', verbose_name='Precio total')
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el')
 
     class Meta:
@@ -170,7 +168,7 @@ class Payment(models.Model):
         related_name='payments',
         verbose_name='Estado'
     )
-    amount = models.DecimalField(max_digits=10, decimal_places=2, db_column='amount', verbose_name='Monto')
+    amount = models.PositiveIntegerField(db_column='amount', verbose_name='Monto', null=True, blank=True)
     currency = models.CharField(max_length=10, default='CLP', db_column='currency', verbose_name='Moneda')
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at', verbose_name='Actualizado el')
@@ -199,7 +197,7 @@ class PaymentTransaction(models.Model):
     authorization_code = models.CharField(max_length=64, null=True, blank=True, db_column='authorization_code', verbose_name='Código de autorización')
     response_code = models.IntegerField(null=True, blank=True, db_column='response_code', verbose_name='Código de respuesta')
     card_detail = models.CharField(max_length=100, null=True, blank=True, db_column='card_detail', verbose_name='Detalle de tarjeta')
-    amount = models.DecimalField(max_digits=10, decimal_places=2, db_column='amount', verbose_name='Monto')
+    amount = models.PositiveIntegerField(db_column='amount', verbose_name='Monto')
     status = models.CharField(max_length=50, null=True, blank=True, db_column='status', verbose_name='Estado')
     processed_at = models.DateTimeField(null=True, blank=True, db_column='processed_at', verbose_name='Procesado el')
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el')
@@ -210,8 +208,9 @@ class PaymentTransaction(models.Model):
         verbose_name = 'Transacción de Pago'
         verbose_name_plural = 'Transacciones de Pago'
         indexes = [
-            models.Index(fields=['tbk_token'], name='idx_token'),
-            models.Index(fields=['buy_order'], name='idx_buy_order'),
+            models.Index(fields=['session_id'], name='idx_payment_tx_session'),
+            models.Index(fields=['tbk_token'], name='idx_payment_tx_token'),
+            models.Index(fields=['buy_order'], name='idx_payment_tx_buy_order'),
         ]
 
     def __str__(self):
@@ -221,16 +220,33 @@ class PaymentTransaction(models.Model):
 class ShippingZone(models.Model):
     """Zona de envío (región geográfica)"""
     id = models.AutoField(primary_key=True, db_column='id')
-    name = models.CharField(max_length=100, unique=True, db_column='name')
-    code = models.CharField(max_length=50, unique=True, db_column='code', help_text='Código único de la zona (ej: REGION_METROPOLITANA)')
+    name = models.CharField(
+        max_length=120,
+        unique=True,
+        db_column='name',
+        verbose_name='Nombre de la zona',
+        help_text='Etiqueta visible en el panel para identificar la zona de envío.'
+    )
+    code = models.CharField(
+        max_length=50,
+        unique=True,
+        db_column='code',
+        verbose_name='Código',
+        help_text='Código único de la zona (ej: REGION_METROPOLITANA)'
+    )
     regions = models.JSONField(
         default=list,
         db_column='regions',
+        verbose_name='Regiones',
         help_text='Lista de regiones incluidas en esta zona (ej: ["Región Metropolitana", "Santiago"])'
     )
-    is_active = models.BooleanField(default=True, db_column='is_active')
-    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
-    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+    is_active = models.BooleanField(
+        default=True,
+        db_column='is_active',
+        verbose_name='Activa'
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at', verbose_name='Actualizado el')
 
     class Meta:
         db_table = 'shipping_zones'
@@ -261,7 +277,8 @@ class ShippingRule(models.Model):
         related_name='shipping_rules',
         null=True,
         blank=True,
-        help_text='Si es null, aplica a todas las zonas'
+        help_text='Si es null, aplica a todas las zonas',
+        verbose_name='Zona de envío'
     )
     rule_type = models.CharField(
         max_length=20,
@@ -276,7 +293,8 @@ class ShippingRule(models.Model):
         related_name='shipping_rules',
         null=True,
         blank=True,
-        help_text='Producto específico (solo si rule_type=PRODUCT)'
+        help_text='Producto específico (solo si rule_type=PRODUCT)',
+        verbose_name='Producto específico'
     )
     category = models.ForeignKey(
         Category,
@@ -285,7 +303,8 @@ class ShippingRule(models.Model):
         related_name='shipping_rules',
         null=True,
         blank=True,
-        help_text='Categoría específica (solo si rule_type=CATEGORY)'
+        help_text='Categoría específica (solo si rule_type=CATEGORY)',
+        verbose_name='Categoría específica'
     )
     priority = models.IntegerField(
         default=0,
@@ -293,22 +312,18 @@ class ShippingRule(models.Model):
         validators=[MinValueValidator(0)],
         help_text='Prioridad (mayor número = mayor prioridad). Las reglas de PRODUCT tienen prioridad sobre CATEGORY, y CATEGORY sobre ALL.'
     )
-    base_cost = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=Decimal('0.00'),
+    base_cost = models.PositiveIntegerField(
+        default=0,
         db_column='base_cost',
-        validators=[MinValueValidator(Decimal('0.00'))],
-        help_text='Costo base de envío'
+        help_text='Costo base de envío',
+        verbose_name='Costo base'
     )
-    free_shipping_threshold = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+    free_shipping_threshold = models.PositiveIntegerField(
         null=True,
         blank=True,
         db_column='free_shipping_threshold',
-        validators=[MinValueValidator(Decimal('0.00'))],
-        help_text='Umbral para envío gratis (null = no hay envío gratis para esta regla)'
+        help_text='Umbral para envío gratis (null = no hay envío gratis para esta regla)',
+        verbose_name='Umbral de envío gratis'
     )
     is_active = models.BooleanField(default=True, db_column='is_active')
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
@@ -322,6 +337,8 @@ class ShippingRule(models.Model):
             models.Index(fields=['zone', 'is_active'], name='idx_rule_zone_active'),
             models.Index(fields=['rule_type', 'is_active'], name='idx_rule_type_active'),
             models.Index(fields=['priority'], name='idx_rule_priority'),
+            models.Index(fields=['rule_type', 'product'], name='idx_shiprule_type_product'),
+            models.Index(fields=['rule_type', 'category'], name='idx_shiprule_type_category'),
         ]
         ordering = ['-priority', '-created_at']
 

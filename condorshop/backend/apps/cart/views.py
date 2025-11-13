@@ -55,13 +55,17 @@ def add_to_cart(request):
     cart, session_token = get_cart(request)
 
     # Usar final_price (precio con descuento si existe)
-    unit_price = product.final_price
+    unit_price = int(product.final_price)
     
     # Verificar si el producto ya está en el carrito
     cart_item, created = CartItem.objects.get_or_create(
         cart=cart,
         product=product,
-        defaults={'quantity': quantity, 'unit_price': unit_price}
+        defaults={
+            'quantity': quantity,
+            'unit_price': unit_price,
+            'total_price': unit_price * quantity,
+        }
     )
 
     if not created:
@@ -98,8 +102,9 @@ def view_cart(request):
     """
     cart, session_token = get_cart(request)
     # Optimizar consultas con select_related para incluir productos y categorías
-    cart = Cart.objects.prefetch_related(
-        'items__product__category'
+    cart = Cart.objects.select_related('user').prefetch_related(
+        'items__product__category',
+        'items__product__images'
     ).get(id=cart.id)
     
     # Actualizar precios de items si han cambiado (por ejemplo, si se aplicó un descuento)
@@ -111,7 +116,7 @@ def view_cart(request):
                 # Solo actualizar si el precio cambió (para evitar updates innecesarios)
                 if item.unit_price != new_unit_price:
                     item.unit_price = new_unit_price
-                    item.save(update_fields=['unit_price'])
+                    item.save(update_fields=['unit_price', 'total_price'])
     
     serializer = CartSerializer(cart)
     response = Response(serializer.data)

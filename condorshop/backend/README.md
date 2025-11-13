@@ -122,7 +122,6 @@ backend/
 │   ├── products/       # Catálogo de productos
 │   ├── cart/           # Carrito de compras
 │   ├── orders/         # Pedidos y estados
-│   ├── admin_panel/    # Panel de administración
 │   └── audit/          # Auditoría
 └── media/              # Archivos multimedia
 ```
@@ -252,18 +251,10 @@ El módulo de órdenes expone los mismos endpoints bajo dos prefijos por conveni
 - Endpoints como `/api/payments/webpay/create` y `/api/payments/webpay/commit` aún no están implementados; cuando se habiliten se documentará el flujo completo (crear → redirigir al gateway → retornar → confirmar) junto con las variables `WEBPAY_*` necesarias en `.env`.
 ++ End Patch
 
-### Panel de Administración (`/api/admin/`)
+### Administración
 
-| Método | Endpoint | Descripción | Permisos |
-|--------|----------|-------------|----------|
-| GET/POST | `/api/admin/products` | CRUD de productos | `IsAuthenticated` + `IsAdmin` |
-| GET/PATCH/DELETE | `/api/admin/products/{id}` | Operaciones sobre producto | `IsAuthenticated` + `IsAdmin` |
-| POST | `/api/admin/products/{id}/images` | Subir imagen a producto (form-data: `image`, `alt_text` opcional, `position` opcional) | `IsAuthenticated` + `IsAdmin` |
-| GET | `/api/admin/orders` | Lista de todos los pedidos (filtros: `status`, `customer_email`, `date_from`, `date_to`) | `IsAuthenticated` + `IsAdmin` |
-| GET | `/api/admin/orders/{id}` | Detalle de un pedido | `IsAuthenticated` + `IsAdmin` |
-| PATCH | `/api/admin/orders/{id}/status` | Cambiar estado de pedido (Body: `{ "status_id": 2, "note": "..." }`) | `IsAuthenticated` + `IsAdmin` |
-| GET | `/api/admin/orders/export` | Exportar pedidos a CSV (query params: `status`, `date_from`, `date_to`) | `IsAuthenticated` + `IsAdmin` |
-| GET | `/api/admin/order-statuses` | Lista de estados de pedido | `IsAuthenticated` + `IsAdmin` |
+Toda la gestión interna se realiza desde el panel nativo de Django disponible en `/admin/`.  
+Los usuarios con rol `admin` pueden crear y editar productos, revisar pedidos, actualizar estados y gestionar el contenido directamente desde esa interfaz sin recurrir a endpoints REST específicos.
 
 ## 📥 Formato de respuestas y errores
 

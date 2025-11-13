@@ -1,5 +1,3 @@
-import decimal
-
 import pytest
 
 from apps.cart.models import Cart
@@ -9,14 +7,14 @@ from tests.factories import CartFactory, CartItemFactory, ProductFactory
 
 @pytest.mark.django_db
 def test_shipping_quote_allows_guest_requests(api_client):
-    product = ProductFactory(price=decimal.Decimal("25000.00"))
+    product = ProductFactory(price=25000)
 
     payload = {
         "region": "Región Metropolitana",
         "cart_items": [
             {"product_id": product.id, "quantity": 2},
         ],
-        "subtotal": float(product.final_price) * 2,
+        "subtotal": product.final_price * 2,
     }
 
     response = api_client.post("/api/checkout/shipping-quote", payload, format="json")
@@ -29,7 +27,7 @@ def test_shipping_quote_allows_guest_requests(api_client):
 
 @pytest.mark.django_db
 def test_authenticated_user_can_create_order(auth_client, user, pending_status):
-    product = ProductFactory(price=decimal.Decimal("19990.00"))
+    product = ProductFactory(price=19990)
     cart = CartFactory(user=user, session_token=None)
     CartItemFactory(cart=cart, product=product, quantity=2)
 
@@ -59,7 +57,7 @@ def test_authenticated_user_can_create_order(auth_client, user, pending_status):
 
 @pytest.mark.django_db
 def test_guest_checkout_creates_order_with_session_token(api_client, pending_status):
-    product = ProductFactory(price=decimal.Decimal("15000.00"))
+    product = ProductFactory(price=15000)
     guest_token = "guest-test-token"
     cart = CartFactory(user=None, session_token=guest_token)
     CartItemFactory(cart=cart, product=product, quantity=3)

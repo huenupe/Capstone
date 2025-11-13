@@ -193,7 +193,7 @@ const StepPayment = () => {
                 
                 <div className="flex justify-between text-xl font-bold text-gray-900 border-t pt-2">
                   <span>Total</span>
-                  <span>{formatPrice(subtotal + deliveryCost)}</span>
+                  <span>{formatPrice(total ?? ((subtotal ?? 0) + (deliveryCost ?? 0)))}</span>
                 </div>
               </div>
             </div>

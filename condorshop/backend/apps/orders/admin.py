@@ -54,7 +54,7 @@ class OrderStatusHistoryInline(admin.TabularInline):
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    list_display = ('id', 'customer_email', 'status', 'total_amount', 'created_at')
+    list_display = ('id', 'user', 'status', 'customer_email', 'total_amount', 'created_at')
     list_filter = ('status', 'created_at')
     search_fields = ('customer_email', 'customer_name', 'id')
     inlines = [OrderItemInline, OrderStatusHistoryInline]

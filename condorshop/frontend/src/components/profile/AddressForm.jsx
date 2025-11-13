@@ -9,7 +9,6 @@ const AddressForm = ({ address, regions, onSave, onCancel }) => {
     register,
     handleSubmit,
     formState: { errors },
-    setValue,
   } = useForm({
     defaultValues: address ? {
       label: address.label || '',

@@ -52,10 +52,9 @@ frontend/
 │   ├── pages/          # Páginas de la aplicación
 │   │   ├── Auth/       # Login, Register, ForgotPassword, ResetPassword
 │   │   ├── Checkout/   # StepCustomer, StepAddress, StepPayment, StepReview
-│   │   ├── Admin/      # Dashboard, Products, Orders
 │   │   └── [Otras]     # Home, Cart, ProductDetail, CategoryPage, Profile, Orders
-│   ├── routes/         # Configuración de rutas (AppRoutes, ProtectedRoute, RoleRoute)
-│   ├── services/       # Servicios API (Axios): auth, products, cart, orders, admin, categories
+│   ├── routes/         # Configuración de rutas (AppRoutes, ProtectedRoute)
+│   ├── services/       # Servicios API (Axios): auth, products, cart, orders, categories
 │   ├── store/          # Zustand stores (authSlice, cartSlice, checkoutSlice)
 │   ├── utils/          # Utilidades (authToken, formatPrice, getProductImage, storage, validations)
 │   ├── App.jsx         # Componente principal
@@ -92,11 +91,6 @@ Durante este flujo el frontend solicita cotizaciones de envío en tiempo real me
 - **Profile**: Perfil y datos personales
 - **Orders**: Historial de pedidos
 
-### Panel Admin
-- **Dashboard**: Estadísticas generales
-- **Products**: CRUD de productos con subida de imágenes
-- **Orders**: Gestión de pedidos con filtros y exportación CSV
-
 ## Estado Global (Zustand)
 
 - **authSlice**: Maneja autenticación, token, usuario y rol
@@ -113,12 +107,10 @@ El frontend consume la API del backend usando:
 ### Endpoints Utilizados
 
 - **Auth**: `/api/auth/register`, `/api/auth/login`, `/api/users/profile`
-  - ⚠️ **Nota**: Existen páginas `ForgotPassword` y `ResetPassword` pero los endpoints del backend aún no están implementados
 - **Productos**: `/api/products/`, `/api/products/{slug}/`, `/api/products/categories/`
 - **Carrito**: `/api/cart/`, `/api/cart/add`, `/api/cart/items/{id}`, `/api/cart/items/{id}/delete`
 - **Checkout**: `/api/checkout/mode`, `/api/checkout/shipping-quote`, `/api/checkout/create`
 - **Pedidos**: `/api/orders/`, `/api/orders/{id}/`
-- **Admin**: `/api/admin/products`, `/api/admin/orders`, `/api/admin/order-statuses`
 
 Ver `backend/README.md` para documentación completa de la API.
 

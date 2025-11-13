@@ -5,7 +5,7 @@ export const cartService = {
    * Obtener carrito
    */
   getCart: async () => {
-    const response = await apiClient.get('/cart')
+    const response = await apiClient.get('/cart/')
     return response.data
   },
 

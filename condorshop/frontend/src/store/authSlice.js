@@ -93,7 +93,7 @@ export const useAuthStore = create(
         token: state.token,
         isAuthenticated: state.isAuthenticated,
       }),
-      migrate: (persistedState, version) => {
+      migrate: (persistedState) => {
         return migrateAuthState(persistedState)
       },
     }

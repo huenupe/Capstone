@@ -1,7 +1,8 @@
 from rest_framework import serializers
 
+from apps.common.utils import format_clp
 from .models import Order, OrderItem, OrderStatus, OrderStatusHistory
-from apps.products.serializers import ProductListSerializer, to_int
+from apps.products.serializers import ProductListSerializer
 
 
 class OrderStatusSerializer(serializers.ModelSerializer):
@@ -12,40 +13,66 @@ class OrderStatusSerializer(serializers.ModelSerializer):
 
 class OrderItemSerializer(serializers.ModelSerializer):
     product = ProductListSerializer(read_only=True)
-    unit_price = serializers.SerializerMethodField()
-    total_price = serializers.SerializerMethodField()
+    unit_price = serializers.IntegerField(read_only=True)
+    total_price = serializers.IntegerField(read_only=True)
+    unit_price_formatted = serializers.SerializerMethodField()
+    total_price_formatted = serializers.SerializerMethodField()
 
     class Meta:
         model = OrderItem
-        fields = ('id', 'product', 'quantity', 'unit_price', 'total_price')
+        fields = (
+            'id',
+            'product',
+            'quantity',
+            'unit_price',
+            'total_price',
+            'unit_price_formatted',
+            'total_price_formatted',
+        )
 
-    def get_unit_price(self, obj):
-        return to_int(obj.unit_price)
+    def get_unit_price_formatted(self, obj):
+        return format_clp(obj.unit_price)
 
-    def get_total_price(self, obj):
-        return to_int(obj.total_price)
+    def get_total_price_formatted(self, obj):
+        return format_clp(obj.total_price)
 
 
 class OrderSerializer(serializers.ModelSerializer):
     status = OrderStatusSerializer(read_only=True)
     items = OrderItemSerializer(many=True, read_only=True)
-    total_amount = serializers.SerializerMethodField()
-    shipping_cost = serializers.SerializerMethodField()
+    total_amount = serializers.IntegerField(read_only=True)
+    shipping_cost = serializers.IntegerField(read_only=True)
+    total_amount_formatted = serializers.SerializerMethodField()
+    shipping_cost_formatted = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
         fields = (
-            'id', 'status', 'customer_name', 'customer_email', 'customer_phone',
-            'shipping_street', 'shipping_city', 'shipping_region', 'shipping_postal_code',
-            'total_amount', 'shipping_cost', 'currency', 'created_at', 'updated_at', 'items'
+            'id',
+            'status',
+            'customer_name',
+            'customer_email',
+            'customer_phone',
+            'shipping_street',
+            'shipping_city',
+            'shipping_region',
+            'shipping_postal_code',
+            'total_amount',
+            'shipping_cost',
+            'currency',
+            'created_at',
+            'updated_at',
+            'items',
+            'total_amount_formatted',
+            'shipping_cost_formatted',
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
 
-    def get_total_amount(self, obj):
-        return to_int(obj.total_amount)
+    def get_total_amount_formatted(self, obj):
+        return format_clp(obj.total_amount)
 
-    def get_shipping_cost(self, obj):
-        return to_int(obj.shipping_cost)
+    def get_shipping_cost_formatted(self, obj):
+        return format_clp(obj.shipping_cost)
 
 
 class CreateOrderSerializer(serializers.Serializer):
@@ -77,26 +104,44 @@ class OrderAdminSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     user_email = serializers.SerializerMethodField()
     status_history = OrderStatusHistorySerializer(many=True, read_only=True)
-    total_amount = serializers.SerializerMethodField()
-    shipping_cost = serializers.SerializerMethodField()
+    total_amount = serializers.IntegerField(read_only=True)
+    shipping_cost = serializers.IntegerField(read_only=True)
+    total_amount_formatted = serializers.SerializerMethodField()
+    shipping_cost_formatted = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
         fields = (
-            'id', 'user', 'user_email', 'status', 'status_id',
-            'customer_name', 'customer_email', 'customer_phone',
-            'shipping_street', 'shipping_city', 'shipping_region', 'shipping_postal_code',
-            'total_amount', 'shipping_cost', 'currency',
-            'created_at', 'updated_at', 'items', 'status_history'
+            'id',
+            'user',
+            'user_email',
+            'status',
+            'status_id',
+            'customer_name',
+            'customer_email',
+            'customer_phone',
+            'shipping_street',
+            'shipping_city',
+            'shipping_region',
+            'shipping_postal_code',
+            'total_amount',
+            'shipping_cost',
+            'currency',
+            'created_at',
+            'updated_at',
+            'items',
+            'status_history',
+            'total_amount_formatted',
+            'shipping_cost_formatted',
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
 
     def get_user_email(self, obj):
         return obj.user.email if obj.user else None
 
-    def get_total_amount(self, obj):
-        return to_int(obj.total_amount)
+    def get_total_amount_formatted(self, obj):
+        return format_clp(obj.total_amount)
 
-    def get_shipping_cost(self, obj):
-        return to_int(obj.shipping_cost)
+    def get_shipping_cost_formatted(self, obj):
+        return format_clp(obj.shipping_cost)
 

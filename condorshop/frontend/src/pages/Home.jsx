@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import HeroCarousel from '../components/home/HeroCarousel'
 import CategoryGrid from '../components/home/CategoryGrid'
@@ -19,7 +19,7 @@ const Home = () => {
 
   const searchQuery = searchParams.get('search') || ''
 
-  const loadSearchProducts = async (query) => {
+  const loadSearchProducts = useCallback(async (query) => {
     if (!query.trim()) {
       setShowSearchResults(false)
       setProducts([])
@@ -46,7 +46,7 @@ const Home = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [toast])
 
   // Listen for search events from Header
   useEffect(() => {
@@ -63,20 +63,24 @@ const Home = () => {
 
     window.addEventListener('searchProducts', handleSearch)
     return () => window.removeEventListener('searchProducts', handleSearch)
-  }, [])
+  }, [loadSearchProducts])
 
   // Load products if search param exists in URL (on mount or when search param changes)
   useEffect(() => {
-    const query = searchParams.get('search') || ''
-    if (query) {
-      setShowSearchResults(true)
-      loadSearchProducts(query)
+    if (searchQuery) {
+      if (!showSearchResults) {
+        setShowSearchResults(true)
+      }
+      loadSearchProducts(searchQuery)
     } else {
-      setShowSearchResults(false)
-      setProducts([])
+      if (showSearchResults) {
+        setShowSearchResults(false)
+      }
+      if (products.length > 0) {
+        setProducts([])
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams])
+  }, [searchQuery, loadSearchProducts, showSearchResults, products.length])
 
   // Show search results if there's a search query
   if (showSearchResults || searchQuery) {

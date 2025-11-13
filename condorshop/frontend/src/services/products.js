@@ -6,7 +6,7 @@ export const productsService = {
    * @param {Object} params - { search, category, min_price, max_price, ordering, page, page_size }
    */
   getProducts: async (params = {}) => {
-    const response = await apiClient.get('/products', { params })
+    const response = await apiClient.get('/products/', { params })
     return response.data
   },
 
@@ -15,7 +15,7 @@ export const productsService = {
    * @param {string} slug - Slug del producto
    */
   getProductBySlug: async (slug) => {
-    const response = await apiClient.get(`/products/${slug}`)
+    const response = await apiClient.get(`/products/${slug}/`)
     return response.data
   },
 

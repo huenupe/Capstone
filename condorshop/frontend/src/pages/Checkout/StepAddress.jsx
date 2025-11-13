@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import Button from '../../components/common/Button'
@@ -24,7 +24,6 @@ const StepAddress = () => {
   const { isAuthenticated, user } = useAuthStore()
   const { items, subtotal, shipping, total, totalDiscount, updateTotals } = useCartStore()
   const { setDeliveryMethod, deliveryMethod } = useCheckoutStore()
-  const [showAddressModal, setShowAddressModal] = useState(false)
   const [selectedDeliveryMethod, setSelectedDeliveryMethod] = useState(deliveryMethod || 'delivery')
   const [shippingQuote, setShippingQuote] = useState(null)
   const [loadingQuote, setLoadingQuote] = useState(false)
@@ -146,14 +145,30 @@ const StepAddress = () => {
     }
   }, [items, updateTotals])
 
-  // Cargar direcciones guardadas si el usuario está autenticado
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadSavedAddresses()
-    }
-  }, [isAuthenticated])
+  const selectAddress = useCallback((address) => {
+    setSelectedAddressId(address.id)
+    // Mapear región del backend al formato del frontend
+    const regionValue = matchRegionValue(address.region)
 
-  const loadSavedAddresses = async () => {
+    setValue('street', address.street || '')
+    setValue('city', address.city || '')
+    setValue('region', regionValue || '')
+    setValue('postal_code', address.postal_code || '')
+    setValue('number', address.number || '')
+    setValue('apartment', address.apartment || '')
+  }, [setSelectedAddressId, setValue])
+
+  const handleNewAddress = useCallback(() => {
+    setSelectedAddressId(null)
+    setValue('street', '')
+    setValue('city', '')
+    setValue('region', '')
+    setValue('postal_code', '')
+    setValue('number', '')
+    setValue('apartment', '')
+  }, [setSelectedAddressId, setValue])
+
+  const loadSavedAddresses = useCallback(async () => {
     setLoadingAddresses(true)
     try {
       const addresses = await usersService.getAddresses()
@@ -169,30 +184,14 @@ const StepAddress = () => {
     } finally {
       setLoadingAddresses(false)
     }
-  }
+  }, [selectAddress])
 
-  const selectAddress = (address) => {
-    setSelectedAddressId(address.id)
-    // Mapear región del backend al formato del frontend
-    const regionValue = matchRegionValue(address.region)
-    
-    setValue('street', address.street || '')
-    setValue('city', address.city || '')
-    setValue('region', regionValue || '')
-    setValue('postal_code', address.postal_code || '')
-    setValue('number', address.number || '')
-    setValue('apartment', address.apartment || '')
-  }
-
-  const handleNewAddress = () => {
-    setSelectedAddressId(null)
-    setValue('street', '')
-    setValue('city', '')
-    setValue('region', '')
-    setValue('postal_code', '')
-    setValue('number', '')
-    setValue('apartment', '')
-  }
+  // Cargar direcciones guardadas si el usuario está autenticado
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadSavedAddresses()
+    }
+  }, [isAuthenticated, loadSavedAddresses])
 
   // Verificar que los pasos anteriores estén completos
   useEffect(() => {
@@ -282,6 +281,12 @@ const StepAddress = () => {
             {/* Dirección */}
             <div className="bg-white shadow-md rounded-lg p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Dirección de Envío</h2>
+
+              {isAuthenticated && loadingAddresses && (
+                <div className="text-sm text-gray-500 mb-4">
+                  Cargando direcciones guardadas...
+                </div>
+              )}
 
               {/* Dirección Guardada - Estilo Falabella */}
               {isAuthenticated && selectedAddressId && savedAddresses.length > 0 && (() => {
@@ -708,7 +713,7 @@ const StepAddress = () => {
                 
                 <div className="flex justify-between text-xl font-bold text-gray-900 border-t pt-2">
                   <span>Total</span>
-                  <span>{formatPrice((subtotal || 0) + (deliveryCost || 0))}</span>
+                  <span>{formatPrice(total ?? ((subtotal || 0) + (deliveryCost || 0)))}</span>
                 </div>
               </div>
 

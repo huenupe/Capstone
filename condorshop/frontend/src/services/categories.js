@@ -5,7 +5,7 @@ export const categoriesService = {
    * Obtener todas las categorías
    */
   getCategories: async () => {
-    const response = await apiClient.get('/products/categories')
+    const response = await apiClient.get('/products/categories/')
     return response.data
   },
 
@@ -14,7 +14,7 @@ export const categoriesService = {
    * @param {string} slug - Slug de la categoría
    */
   getCategoryBySlug: async (slug) => {
-    const response = await apiClient.get(`/products/categories`)
+    const response = await apiClient.get('/products/categories/')
     const categories = Array.isArray(response.data) 
       ? response.data 
       : response.data.results || []

@@ -1,6 +1,5 @@
 """Servicios y utilidades para el dominio de pedidos."""
 
-from decimal import Decimal, InvalidOperation
 from typing import Iterable, Optional, Sequence, Set
 
 from django.conf import settings
@@ -11,18 +10,27 @@ from apps.products.models import Product
 from .models import ShippingRule, ShippingZone
 
 
-DEFAULT_FREE_SHIPPING_THRESHOLD = Decimal("50000.00")
-DEFAULT_SHIPPING_COST = Decimal("5000.00")
+DEFAULT_FREE_SHIPPING_THRESHOLD = 50000
+DEFAULT_SHIPPING_COST = 5000
 
 
-def _to_decimal(value) -> Decimal:
-    """Convertir un valor numérico (o string) a Decimal de forma segura."""
-    if isinstance(value, Decimal):
+def _to_int(value) -> int:
+    """Convertir un valor numérico (o string) a entero CLP con redondeo half-up."""
+    if isinstance(value, int):
         return value
-    try:
-        return Decimal(str(value))
-    except (TypeError, InvalidOperation):
-        return Decimal("0.00")
+    if value is None:
+        return 0
+    value_str = str(value)
+    if not value_str:
+        return 0
+    if '.' not in value_str:
+        return int(value_str)
+    integer_part, fractional_part = value_str.split('.', 1)
+    fractional_part = (fractional_part + '00')[:2]
+    rounded = int(integer_part or '0')
+    if int(fractional_part) >= 50:
+        rounded += 1
+    return rounded
 
 
 def _extract_product_context(cart_items: Sequence) -> tuple[list[int], Set[int]]:
@@ -62,17 +70,17 @@ def evaluate_shipping(region: Optional[str], subtotal, cart_items: Optional[Iter
     Determinar costo de envío y metadatos relevantes reutilizables en el checkout.
 
     Retorna un diccionario con las llaves:
-    - cost (Decimal)
-    - free_shipping_threshold (Decimal | None)
+    - cost (int)
+    - free_shipping_threshold (int | None)
     - zone (str | None)
     - rule_type (str)
     - applied_rule_id (int | None)
     """
 
-    subtotal_decimal = _to_decimal(subtotal)
+    subtotal_int = _to_int(subtotal)
 
     if not region or not cart_items:
-        cost = Decimal("0.00") if subtotal_decimal >= DEFAULT_FREE_SHIPPING_THRESHOLD else DEFAULT_SHIPPING_COST
+        cost = 0 if subtotal_int >= DEFAULT_FREE_SHIPPING_THRESHOLD else DEFAULT_SHIPPING_COST
         return {
             "cost": cost,
             "free_shipping_threshold": DEFAULT_FREE_SHIPPING_THRESHOLD,
@@ -87,37 +95,40 @@ def evaluate_shipping(region: Optional[str], subtotal, cart_items: Optional[Iter
         regions__icontains=region,
     ).first()
 
-    rules = ShippingRule.objects.filter(is_active=True)
+    rules_qs = ShippingRule.objects.filter(is_active=True).select_related(
+        "zone", "product__category", "category"
+    )
     if zone:
-        rules = rules.filter(zone__in=[zone, None])
+        rules_qs = rules_qs.filter(zone__in=[zone, None])
     else:
-        rules = rules.filter(zone__isnull=True)
+        rules_qs = rules_qs.filter(zone__isnull=True)
 
-    rules = rules.order_by("-priority", "-created_at")
+    rules_qs = rules_qs.order_by("-priority", "-created_at")
 
     product_ids, category_ids = _extract_product_context(list(cart_items))
+    product_id_set = set(product_ids)
+    category_id_set = set(category_ids)
 
     applied_rule = None
+    category_rule = None
+    all_rule = None
 
-    if product_ids:
-        product_rules = rules.filter(rule_type="PRODUCT", product_id__in=product_ids)
-        if product_rules.exists():
-            applied_rule = product_rules.first()
-
-    if not applied_rule and category_ids:
-        category_rules = rules.filter(rule_type="CATEGORY", category_id__in=category_ids)
-        if category_rules.exists():
-            applied_rule = category_rules.first()
+    for rule in rules_qs:
+        if rule.rule_type == "PRODUCT" and rule.product_id in product_id_set:
+            applied_rule = rule
+            break
+        if rule.rule_type == "CATEGORY" and rule.category_id in category_id_set and category_rule is None:
+            category_rule = rule
+        if rule.rule_type == "ALL" and all_rule is None:
+            all_rule = rule
 
     if not applied_rule:
-        all_rules = rules.filter(rule_type="ALL")
-        if all_rules.exists():
-            applied_rule = all_rules.first()
+        applied_rule = category_rule or all_rule
 
     if applied_rule:
         threshold = applied_rule.free_shipping_threshold
-        if threshold and subtotal_decimal >= threshold:
-            cost = Decimal("0.00")
+        if threshold and subtotal_int >= threshold:
+            cost = 0
         else:
             cost = applied_rule.base_cost
 
@@ -130,7 +141,7 @@ def evaluate_shipping(region: Optional[str], subtotal, cart_items: Optional[Iter
         }
 
     # Fallback por defecto
-    cost = Decimal("0.00") if subtotal_decimal >= DEFAULT_FREE_SHIPPING_THRESHOLD else DEFAULT_SHIPPING_COST
+    cost = 0 if subtotal_int >= DEFAULT_FREE_SHIPPING_THRESHOLD else DEFAULT_SHIPPING_COST
     return {
         "cost": cost,
         "free_shipping_threshold": DEFAULT_FREE_SHIPPING_THRESHOLD,

@@ -2,6 +2,7 @@
 Django settings for condorshop_api project.
 """
 import os
+import mimetypes
 from pathlib import Path
 import environ
 
@@ -10,6 +11,9 @@ pymysql.install_as_MySQLdb()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Asegurar que los archivos .webp se sirvan con el tipo de contenido correcto en desarrollo
+mimetypes.add_type("image/webp", ".webp", strict=True)
 
 # Load environment variables
 env = environ.Env(
@@ -43,11 +47,11 @@ INSTALLED_APPS = [
     'django_filters',
     # Local apps
     'condorshop_api.apps.CondorShopAPIConfig',
+    'apps.common',
     'apps.users',
     'apps.products',
     'apps.cart',
     'apps.orders',
-    'apps.admin_panel',
     'apps.audit',
 ]
 
@@ -166,10 +170,18 @@ SIMPLE_JWT = {
 }
 
 # CORS Settings
+CORS_DEFAULT_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5174',
+]
 CORS_ALLOWED_ORIGINS = env.list(
     'CORS_ALLOWED_ORIGINS',
-    default=['http://localhost:5173', 'http://127.0.0.1:5173']
+    default=CORS_DEFAULT_ORIGINS
 )
+# Asegurar que los orígenes por defecto estén presentes, aunque .env no se actualice
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(CORS_ALLOWED_ORIGINS + CORS_DEFAULT_ORIGINS))
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -198,10 +210,12 @@ CORS_EXPOSE_HEADERS = [
 ]
 
 # CSRF Settings
+CSRF_TRUSTED_ORIGINS_DEFAULT = CORS_DEFAULT_ORIGINS
 CSRF_TRUSTED_ORIGINS = env.list(
     'CSRF_TRUSTED_ORIGINS',
-    default=['http://localhost:5173', 'http://127.0.0.1:5173']
+    default=CSRF_TRUSTED_ORIGINS_DEFAULT
 )
+CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(CSRF_TRUSTED_ORIGINS + CSRF_TRUSTED_ORIGINS_DEFAULT))
 
 # Security Settings (production-ready)
 if not DEBUG:

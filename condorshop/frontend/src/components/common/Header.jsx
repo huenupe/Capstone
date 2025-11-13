@@ -12,7 +12,6 @@ const Header = () => {
   
   // Acceso seguro a stores con defaults - usar selector seguro
   const isAuthenticated = useAuthStore((state) => state?.isAuthenticated ?? false)
-  const role = useAuthStore((state) => state?.role ?? null)
   const logout = useAuthStore((state) => state?.logout ?? (() => {}))
   
   const itemCount = useCartStore((state) => {
@@ -121,17 +120,6 @@ const Header = () => {
                   >
                     Mis Pedidos
                   </Link>
-                  {role === 'admin' && (
-                    <Link
-                      to="/admin"
-                      className="text-primary-600 font-semibold hover:text-primary-700 transition-colors flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:rounded"
-                    >
-                      <span>Admin</span>
-                      <span className="bg-primary-600 text-white text-xs px-2 py-0.5 rounded-full">
-                        Admin
-                      </span>
-                    </Link>
-                  )}
                   <Button variant="ghost" size="sm" onClick={handleLogout}>
                     Cerrar Sesión
                   </Button>
@@ -266,17 +254,6 @@ const Header = () => {
                 >
                   Pedidos
                 </Link>
-                {role === 'admin' && (
-                  <>
-                    <span className="text-gray-300">|</span>
-                    <Link
-                      to="/admin"
-                      className="text-sm text-primary-600 font-semibold hover:text-primary-700 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:rounded"
-                    >
-                      Admin
-                    </Link>
-                  </>
-                )}
                 <span className="text-gray-300">|</span>
                 <button
                   onClick={handleLogout}

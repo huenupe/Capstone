@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { formatPrice } from '../utils/formatPrice'
 import { getProductImage } from '../utils/getProductImage'
@@ -15,38 +15,48 @@ const Cart = () => {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(null)
-  const { items, subtotal, shipping, total, totalDiscount, setCart, updateItemQuantity, removeItem, updateTotals } = useCartStore()
+  const {
+    items,
+    subtotal,
+    total,
+    totalDiscount,
+    setCart,
+    updateItemQuantity,
+    removeItem,
+    updateTotals,
+  } = useCartStore()
   const { isAuthenticated } = useAuthStore()
   const toast = useToast()
+  const toastRef = useRef(toast)
 
   useEffect(() => {
-    loadCart()
+    toastRef.current = toast
+  }, [toast])
+
+  const showToast = useCallback((type, message) => {
+    const current = toastRef.current
+    if (!current || typeof current[type] !== 'function') {
+      return
+    }
+    current[type](message)
   }, [])
 
-  // Forzar actualización de totales cuando cambian los items
-  useEffect(() => {
-    if (items && items.length > 0 && updateTotals) {
-      updateTotals()
-    }
-  }, [items, updateTotals])
-
-  const loadCart = async () => {
+  const loadCart = useCallback(async () => {
     setLoading(true)
     try {
       const data = await cartService.getCart()
       setCart(data)
-      // Asegurar que los totales se actualicen después de cargar
-      const { updateTotals } = useCartStore.getState()
-      if (updateTotals) {
-        updateTotals()
-      }
     } catch (error) {
       console.error('Error loading cart:', error)
-      toast.error('Error al cargar el carrito')
+      showToast('error', 'Error al cargar el carrito')
     } finally {
       setLoading(false)
     }
-  }
+  }, [setCart, showToast])
+
+  useEffect(() => {
+    loadCart()
+  }, [loadCart])
 
   const handleUpdateQuantity = async (itemId, quantity) => {
     if (quantity < 1) {
@@ -60,9 +70,9 @@ const Cart = () => {
       updateItemQuantity(itemId, quantity)
       updateTotals() // Asegurar que los totales se actualicen
       await loadCart() // Refresh to get updated data
-      toast.success('Cantidad actualizada')
+      showToast('success', 'Cantidad actualizada')
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Error al actualizar cantidad')
+      showToast('error', error.response?.data?.error || 'Error al actualizar cantidad')
       console.error('Error updating cart item:', error)
     } finally {
       setUpdating(null)
@@ -75,9 +85,9 @@ const Cart = () => {
       await cartService.removeCartItem(itemId)
       removeItem(itemId)
       updateTotals() // Asegurar que los totales se actualicen
-      toast.success('Producto eliminado del carrito')
+      showToast('success', 'Producto eliminado del carrito')
     } catch (error) {
-      toast.error('Error al eliminar producto')
+      showToast('error', 'Error al eliminar producto')
       console.error('Error removing cart item:', error)
     } finally {
       setUpdating(null)
@@ -197,7 +207,6 @@ const Cart = () => {
                   <span>Productos ({items.length})</span>
                   <span>{formatPrice(subtotal || 0)}</span>
                 </div>
-                
                 {totalDiscount > 0 && (
                   <div className="flex justify-between text-gray-700">
                     <span className="text-green-600">Descuentos</span>
@@ -207,7 +216,7 @@ const Cart = () => {
                 
                 <div className="border-t pt-3 flex justify-between text-xl font-bold text-gray-900">
                   <span>Total</span>
-                  <span>{formatPrice(subtotal || 0)}</span>
+                  <span>{formatPrice(total ?? subtotal ?? 0)}</span>
                 </div>
               </div>
 

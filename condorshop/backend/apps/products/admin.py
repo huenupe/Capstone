@@ -1,14 +1,17 @@
 from django.contrib import admin
 from django import forms
 from django.core.exceptions import ValidationError
+from django.utils.html import format_html
+from apps.common.utils import format_clp
 from .models import Category, Product, ProductImage
 
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
-    list_display = ('name', 'slug', 'created_at')
+    list_display = ('name', 'slug', 'image_preview', 'created_at')
     prepopulated_fields = {'slug': ('name',)}
     search_fields = ('name',)
+    fields = ('name', 'slug', 'description', 'image')
     
     def name(self, obj):
         return obj.name
@@ -19,6 +22,16 @@ class CategoryAdmin(admin.ModelAdmin):
         return obj.slug
     slug.short_description = 'URL amigable'
     slug.admin_order_field = 'slug'
+    
+    def image_preview(self, obj):
+        if obj.image:
+            return format_html(
+                '<img src="{}" alt="{}" style="width:48px;height:48px;object-fit:cover;border-radius:8px;" />',
+                obj.image.url,
+                obj.name
+            )
+        return '-'
+    image_preview.short_description = 'Imagen'
     
     def created_at(self, obj):
         return obj.created_at.strftime('%d de %B de %Y a las %H:%M') if obj.created_at else '-'
@@ -40,6 +53,11 @@ class ProductAdminForm(forms.ModelForm):
         model = Product
         fields = '__all__'
         widgets = {
+            'price': forms.NumberInput(attrs={
+                'step': '1',
+                'min': '0',
+                'placeholder': 'Ej: 45990'
+            }),
             'discount_price': forms.NumberInput(attrs={
                 'step': '1',
                 'min': '0',
@@ -123,7 +141,7 @@ class ProductAdminForm(forms.ModelForm):
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     form = ProductAdminForm
-    list_display = ('name', 'sku', 'category', 'price', 'stock_qty', 'active', 'created_at')
+    list_display = ('name', 'sku', 'category', 'price_clp', 'stock_qty', 'active', 'created_at')
     list_filter = ('category', 'active', 'created_at')
     search_fields = ('name', 'sku', 'description')
     prepopulated_fields = {'slug': ('name',)}
@@ -134,14 +152,14 @@ class ProductAdmin(admin.ModelAdmin):
             'fields': ('name', 'slug', 'category', 'description', 'brand', 'sku', 'active')
         }),
         ('Precio y Stock', {
-            'fields': ('price', 'stock_qty')
+            'fields': ('price_display', 'price', 'stock_qty')
         }),
         ('Descuentos', {
-            'fields': ('discount_price', 'discount_amount', 'discount_percent'),
+            'fields': ('discount_price_display', 'discount_price', 'discount_amount', 'discount_percent'),
             'description': 'Puedes usar uno de los tres métodos de descuento. Precedencia: Precio final > Monto > Porcentaje. Si configuras "Precio final del descuento", los otros se desactivarán automáticamente. Todos los valores deben ser enteros (CLP sin decimales para montos/precios, 1-100 para porcentaje).'
         }),
         ('Información Calculada', {
-            'fields': ('final_price', 'calculated_discount_percent', 'has_discount'),
+            'fields': ('final_price_display', 'calculated_discount_percent', 'has_discount'),
             'classes': ('collapse',),
             'description': 'Estos valores se calculan automáticamente basados en los descuentos configurados. Todos los precios se muestran como enteros en pesos chilenos (CLP).'
         }),
@@ -151,7 +169,15 @@ class ProductAdmin(admin.ModelAdmin):
         }),
     )
     
-    readonly_fields = ('final_price', 'calculated_discount_percent', 'has_discount', 'created_at', 'updated_at')
+    readonly_fields = (
+        'price_display',
+        'final_price_display',
+        'discount_price_display',
+        'calculated_discount_percent',
+        'has_discount',
+        'created_at',
+        'updated_at',
+    )
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -173,10 +199,22 @@ class ProductAdmin(admin.ModelAdmin):
     category.short_description = 'Categoría'
     category.admin_order_field = 'category__name'
     
-    def price(self, obj):
-        return f"${obj.price:,.0f}".replace(',', '.')
-    price.short_description = 'Precio'
-    price.admin_order_field = 'price'
+    def price_clp(self, obj):
+        return format_clp(obj.price)
+    price_clp.short_description = 'Precio (CLP)'
+    price_clp.admin_order_field = 'price'
+
+    def price_display(self, obj):
+        if not obj:
+            return format_clp(0)
+        return format_clp(obj.price)
+    price_display.short_description = 'Precio (CLP)'
+
+    def discount_price_display(self, obj):
+        if not obj or obj.discount_price is None:
+            return '-'
+        return format_clp(obj.discount_price)
+    discount_price_display.short_description = 'Precio descuento (CLP)'
     
     def stock_qty(self, obj):
         return obj.stock_qty
@@ -195,10 +233,12 @@ class ProductAdmin(admin.ModelAdmin):
     created_at.admin_order_field = 'created_at'
     
     # Métodos para campos calculados en readonly_fields
-    def final_price(self, obj):
+    def final_price_display(self, obj):
         """Muestra el precio final calculado"""
-        return f"${obj.final_price:,.0f}".replace(',', '.')
-    final_price.short_description = 'Precio Final'
+        if not obj:
+            return format_clp(0)
+        return format_clp(obj.final_price)
+    final_price_display.short_description = 'Precio final (CLP)'
     
     def calculated_discount_percent(self, obj):
         """Muestra el porcentaje de descuento calculado (entero)"""

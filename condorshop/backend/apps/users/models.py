@@ -110,8 +110,8 @@ class PasswordResetToken(models.Model):
         verbose_name = 'Token de Restablecimiento de Contraseña'
         verbose_name_plural = 'Tokens de Restablecimiento de Contraseña'
         indexes = [
-            models.Index(fields=['token'], name='idx_reset_token'),
-            models.Index(fields=['expires_at'], name='idx_reset_expires'),
+            models.Index(fields=['expires_at'], name='idx_password_reset_expires'),
+            models.Index(fields=['user', 'used_at'], name='idx_pwreset_user_used_at'),
         ]
 
     def __str__(self):

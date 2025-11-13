@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ProductGallery from '../components/products/ProductGallery'
 import PriceTag from '../components/products/PriceTag'
@@ -19,24 +19,29 @@ const ProductDetail = () => {
   const [addingToCart, setAddingToCart] = useState(false)
   const { setCart } = useCartStore()
   const toast = useToast()
+  const toastRef = useRef(toast)
 
-  useEffect(() => {
-    loadProduct()
-  }, [slug])
-
-  const loadProduct = async () => {
+  const loadProduct = useCallback(async () => {
     setLoading(true)
     try {
       const data = await productsService.getProductBySlug(slug)
       setProduct(data)
     } catch (error) {
-      toast.error('Error al cargar el producto')
+      toastRef.current?.error?.('Error al cargar el producto')
       console.error('Error loading product:', error)
       navigate('/')
     } finally {
       setLoading(false)
     }
-  }
+  }, [navigate, slug])
+
+  useEffect(() => {
+    loadProduct()
+  }, [loadProduct])
+
+  useEffect(() => {
+    toastRef.current = toast
+  }, [toast])
 
   const handleAddToCart = async () => {
     if (!product || product.stock_qty === 0) return

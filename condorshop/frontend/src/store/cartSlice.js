@@ -264,7 +264,7 @@ export const useCartStore = create(
     }),
     {
       name: 'cart-storage',
-      migrate: (persistedState, version) => {
+      migrate: (persistedState) => {
         return migrateCartState(persistedState)
       },
     }

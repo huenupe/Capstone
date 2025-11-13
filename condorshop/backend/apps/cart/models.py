@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.conf import settings
 from apps.products.models import Product
 import uuid
@@ -81,11 +82,13 @@ class CartItem(models.Model):
         verbose_name='Producto'
     )
     quantity = models.PositiveIntegerField(db_column='quantity', verbose_name='Cantidad')
-    unit_price = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
+    unit_price = models.PositiveIntegerField(
         db_column='unit_price',
         verbose_name='Precio unitario'
+    )
+    total_price = models.PositiveIntegerField(
+        db_column='total_price',
+        verbose_name='Precio total'
     )
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
@@ -94,18 +97,31 @@ class CartItem(models.Model):
         db_table = 'cart_items'
         verbose_name = 'Item de Carrito'
         verbose_name_plural = 'Items de Carrito'
-        unique_together = [['cart', 'product']]
         constraints = [
+            models.UniqueConstraint(
+                fields=['cart', 'product'],
+                name='uq_cartitem_cart_product'
+            ),
             models.CheckConstraint(
-                check=models.Q(quantity__gt=0),
+                condition=Q(quantity__gt=0),
                 name='quantity_positive'
-            )
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['cart', 'product'], name='idx_cartitem_cart_product'),
+            models.Index(fields=['product'], name='idx_cartitem_product'),
         ]
 
     def __str__(self):
         return f"{self.quantity}x {self.product.name}"
 
+    def save(self, *args, **kwargs):
+        self.unit_price = int(self.unit_price or 0)
+        self.quantity = int(self.quantity or 0)
+        self.total_price = self.unit_price * self.quantity
+        super().save(*args, **kwargs)
+
     @property
     def subtotal(self):
-        return self.quantity * self.unit_price
+        return self.total_price
 

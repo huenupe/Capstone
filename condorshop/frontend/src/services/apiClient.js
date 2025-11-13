@@ -3,6 +3,9 @@ import { authToken } from '../utils/authToken'
 import { useAuthStore } from '../store/authSlice'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+if (import.meta.env.DEV) {
+  console.debug('[apiClient] baseURL =', API_URL)
+}
 
 // Crear instancia de Axios
 const apiClient = axios.create({

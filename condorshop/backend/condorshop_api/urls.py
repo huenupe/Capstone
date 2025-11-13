@@ -41,7 +41,6 @@ def api_root(request):
             'cart': '/api/cart/',
             'orders': '/api/orders/',
             'checkout': '/api/checkout/',
-            'admin_panel': '/api/admin/',
         }
     })
 
@@ -92,7 +91,6 @@ urlpatterns = [
     path('api/cart/', include('apps.cart.urls')),
     path('api/checkout/', include('apps.orders.urls')),
     path('api/orders/', include('apps.orders.urls')),
-    path('api/admin/', include('apps.admin_panel.urls')),
 ]
 
 if settings.DEBUG:

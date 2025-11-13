@@ -32,12 +32,7 @@ const Login = () => {
       const { user, token } = await authService.login(data)
       login(user, token)
       
-      // Redirect based on role
-      if (user.role === 'admin') {
-        navigate('/admin')
-      } else {
-        navigate('/')
-      }
+      navigate('/')
     } catch (error) {
       const errorMessage = error.response?.data?.error || 'Error al iniciar sesión'
       

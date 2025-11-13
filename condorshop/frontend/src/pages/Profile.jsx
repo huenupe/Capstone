@@ -1,15 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import Button from '../components/common/Button'
 import TextField from '../components/forms/TextField'
-import Select from '../components/forms/Select'
 import Spinner from '../components/common/Spinner'
 import { authService } from '../services/auth'
 import { usersService } from '../services/users'
 import { useAuthStore } from '../store/authSlice'
 import { useToast } from '../components/common/Toast'
-import { validateName, validateChileanPhone, validatePostalCode } from '../utils/validations'
+import { validateName, validateChileanPhone } from '../utils/validations'
 import AddressForm from '../components/profile/AddressForm'
 import apiClient from '../services/apiClient'
 import { REGIONS } from '../constants/regions'
@@ -27,21 +26,46 @@ const Profile = () => {
   const [editingAddressId, setEditingAddressId] = useState(null)
   const [showAddressForm, setShowAddressForm] = useState(false)
   const toast = useToast()
+  const toastRef = useRef(toast)
+
+  useEffect(() => {
+    toastRef.current = toast
+  }, [toast])
+
+  const showToast = useCallback((type, message) => {
+    const current = toastRef.current
+    if (!current || typeof current[type] !== 'function') {
+      return
+    }
+    current[type](message)
+  }, [])
   
   const {
     register,
     handleSubmit,
     formState: { errors, isDirty },
-    setValue,
     reset,
     watch,
   } = useForm()
   
   const watchedValues = watch()
 
+  const loadProfile = useCallback(async () => {
+    setLoadingProfile(true)
+    try {
+      const profileData = await authService.getProfile()
+      updateUser(profileData)
+    } catch (error) {
+      showToast('error', 'Error al cargar el perfil')
+      console.error('Error loading profile:', error)
+    } finally {
+      setLoadingProfile(false)
+    }
+  }, [showToast, updateUser])
+
   useEffect(() => {
     loadProfile()
-  }, [])
+  }, [loadProfile])
 
   useEffect(() => {
     if (user) {
@@ -54,28 +78,7 @@ const Profile = () => {
     }
   }, [user, reset])
 
-  useEffect(() => {
-    loadSavedAddresses()
-  }, [])
-
-  useEffect(() => {
-    setHasChanges(isDirty)
-  }, [isDirty, watchedValues])
-
-  const loadProfile = async () => {
-    setLoadingProfile(true)
-    try {
-      const profileData = await authService.getProfile()
-      updateUser(profileData)
-    } catch (error) {
-      toast.error('Error al cargar el perfil')
-      console.error('Error loading profile:', error)
-    } finally {
-      setLoadingProfile(false)
-    }
-  }
-
-  const loadSavedAddresses = async () => {
+  const loadSavedAddresses = useCallback(async () => {
     setLoadingAddresses(true)
     try {
       const addresses = await usersService.getAddresses()
@@ -85,7 +88,16 @@ const Profile = () => {
     } finally {
       setLoadingAddresses(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    loadSavedAddresses()
+  }, [loadSavedAddresses])
+
+  useEffect(() => {
+    setHasChanges(isDirty)
+  }, [isDirty, watchedValues])
+
 
   const handleEditAddress = (address) => {
     setEditingAddressId(address.id)
@@ -99,10 +111,10 @@ const Profile = () => {
     }
     try {
       await usersService.deleteAddress(addressId)
-      toast.success('Dirección eliminada exitosamente')
+      showToast('success', 'Dirección eliminada exitosamente')
       loadSavedAddresses()
     } catch (error) {
-      toast.error('Error al eliminar la dirección')
+      showToast('error', 'Error al eliminar la dirección')
       console.error('Error deleting address:', error)
     }
   }
@@ -110,10 +122,10 @@ const Profile = () => {
   const handleSetDefaultAddress = async (addressId) => {
     try {
       await usersService.updateAddress(addressId, { is_default: true })
-      toast.success('Dirección predeterminada actualizada')
+      showToast('success', 'Dirección predeterminada actualizada')
       loadSavedAddresses()
     } catch (error) {
-      toast.error('Error al actualizar la dirección predeterminada')
+      showToast('error', 'Error al actualizar la dirección predeterminada')
       console.error('Error setting default address:', error)
     }
   }
@@ -124,10 +136,10 @@ const Profile = () => {
       const updatedProfile = await authService.updateProfile(data)
       updateUser(updatedProfile)
       reset(data)
-      toast.success('Perfil actualizado exitosamente')
+      showToast('success', 'Perfil actualizado exitosamente')
       setHasChanges(false)
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Error al actualizar el perfil')
+      showToast('error', error.response?.data?.error || 'Error al actualizar el perfil')
       console.error('Error updating profile:', error)
     } finally {
       setLoading(false)
@@ -156,10 +168,10 @@ const Profile = () => {
     try {
       await apiClient.delete('/users/me')
       logout()
-      toast.success('Tu cuenta ha sido eliminada')
+      showToast('success', 'Tu cuenta ha sido eliminada')
       navigate('/')
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Error al eliminar la cuenta')
+      showToast('error', error.response?.data?.error || 'Error al eliminar la cuenta')
       console.error('Error deleting account:', error)
       setShowDeleteConfirm(false)
     } finally {

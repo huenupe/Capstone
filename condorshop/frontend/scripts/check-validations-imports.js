@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+/* eslint-env node */
+
 /**
  * Script para verificar que todos los imports desde utils/validations.js
  * correspondan a funciones realmente exportadas
@@ -9,23 +11,13 @@
 
 import { readFileSync, readdirSync, statSync } from 'fs'
 import { join, dirname, resolve } from 'path'
+import process from 'process'
 import { fileURLToPath } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const FRONTEND_ROOT = resolve(__dirname, '..')
 const SRC_DIR = join(FRONTEND_ROOT, 'src')
-
-// Funciones exportadas en validations.js
-const VALIDATION_EXPORTS = [
-  'validateName',
-  'validateOnlyLetters',
-  'validateChileanPhone',
-  'validateEmail',
-  'validatePassword',
-  'validatePostalCode',
-  'validatePasswordMatch',
-]
 
 // Leer validations.js para obtener exports reales
 function getValidationsExports() {

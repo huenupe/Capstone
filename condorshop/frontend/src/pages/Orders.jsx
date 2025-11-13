@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { formatPrice } from '../utils/formatPrice'
 import { getProductImage } from '../utils/getProductImage'
@@ -10,23 +10,36 @@ const Orders = () => {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const toast = useToast()
+  const toastRef = useRef(toast)
 
   useEffect(() => {
-    loadOrders()
+    toastRef.current = toast
+  }, [toast])
+
+  const showToast = useCallback((type, message) => {
+    const current = toastRef.current
+    if (!current || typeof current[type] !== 'function') {
+      return
+    }
+    current[type](message)
   }, [])
 
-  const loadOrders = async () => {
+  const loadOrders = useCallback(async () => {
     setLoading(true)
     try {
       const data = await ordersService.getUserOrders()
       setOrders(Array.isArray(data) ? data : data.results || [])
     } catch (error) {
-      toast.error('Error al cargar los pedidos')
+      showToast('error', 'Error al cargar los pedidos')
       console.error('Error loading orders:', error)
     } finally {
       setLoading(false)
     }
-  }
+  }, [showToast])
+
+  useEffect(() => {
+    loadOrders()
+  }, [loadOrders])
 
   const getStatusBadge = (status) => {
     const statusColors = {
