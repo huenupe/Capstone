@@ -2,7 +2,7 @@ from django.core.exceptions import DisallowedHost
 from rest_framework import serializers
 
 from apps.common.utils import format_clp
-from .models import Category, Product, ProductImage
+from .models import Category, Product, ProductImage, ProductPriceHistory
 
 
 def to_int(value):
@@ -25,11 +25,22 @@ def to_int(value):
 
 
 class CategorySerializer(serializers.ModelSerializer):
+    """Serializer básico de categoría con jerarquía"""
     image = serializers.SerializerMethodField()
+    parent_id = serializers.IntegerField(source='parent_category.id', read_only=True, allow_null=True)
+    parent_name = serializers.CharField(source='parent_category.name', read_only=True, allow_null=True)
+    subcategories = serializers.SerializerMethodField()
+    full_path = serializers.SerializerMethodField()
+    has_children = serializers.SerializerMethodField()
+    depth = serializers.SerializerMethodField()
 
     class Meta:
         model = Category
-        fields = ('id', 'name', 'slug', 'description', 'image')
+        fields = [
+            'id', 'name', 'slug', 'description', 'image',
+            'parent_category', 'parent_id', 'parent_name', 'level',
+            'full_path', 'has_children', 'subcategories', 'sort_order', 'active', 'depth'
+        ]
 
     def get_image(self, obj):
         if not obj.image:
@@ -37,6 +48,45 @@ class CategorySerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         # obj.image.url ya incluye MEDIA_URL; _build_image_url se encarga de normalizar
         return _build_image_url(obj.image.url, request)
+    
+    def get_subcategories(self, obj):
+        """Obtener subcategorías activas (solo IDs para evitar recursión infinita)"""
+        subcats = obj.subcategories.filter(active=True).order_by('sort_order', 'name')
+        return [subcat.id for subcat in subcats]
+    
+    def get_full_path(self, obj):
+        """Path completo: Electrónica > Computadores > Laptops"""
+        return obj.get_full_path()
+    
+    def get_has_children(self, obj):
+        """Indica si tiene subcategorías activas"""
+        return obj.subcategories.filter(active=True).exists()
+    
+    def get_depth(self, obj):
+        """Obtener profundidad en la jerarquía"""
+        return obj.get_depth()
+
+
+class CategoryTreeSerializer(serializers.ModelSerializer):
+    """Serializer recursivo para árbol completo de categorías"""
+    children = serializers.SerializerMethodField()
+    product_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Category
+        fields = [
+            'id', 'name', 'slug', 'level',
+            'children', 'product_count', 'sort_order', 'active'
+        ]
+    
+    def get_children(self, obj):
+        """Recursivamente incluye subcategorías activas"""
+        children = obj.subcategories.filter(active=True).order_by('sort_order', 'name')
+        return CategoryTreeSerializer(children, many=True).data
+    
+    def get_product_count(self, obj):
+        """Cuenta productos activos en esta categoría (sin descendientes)"""
+        return obj.products.filter(active=True).count()
 
 
 def _build_image_url(raw_url: str, request):
@@ -267,4 +317,45 @@ class ProductAdminSerializer(serializers.ModelSerializer):
         data['final_price_formatted'] = format_clp(instance.final_price)
         data['discount_price_formatted'] = format_clp(instance.discount_price) if instance.discount_price else None
         return data
+
+
+class ProductPriceHistorySerializer(serializers.ModelSerializer):
+    """Serializer para historial de precios (solo lectura)"""
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    product_sku = serializers.CharField(source='product.sku', read_only=True)
+    price_formatted = serializers.SerializerMethodField()
+    final_price_formatted = serializers.SerializerMethodField()
+    discount_info = serializers.SerializerMethodField()
+    is_current = serializers.BooleanField(read_only=True)
+    duration_days = serializers.IntegerField(read_only=True)
+    
+    class Meta:
+        model = ProductPriceHistory
+        fields = (
+            'id', 'product', 'product_name', 'product_sku',
+            'price', 'price_formatted',
+            'discount_price', 'discount_amount', 'discount_percent',
+            'final_price', 'final_price_formatted',
+            'discount_info',
+            'effective_from', 'effective_to',
+            'is_current', 'duration_days',
+            'created_at'
+        )
+        read_only_fields = fields
+    
+    def get_price_formatted(self, obj):
+        return format_clp(obj.price)
+    
+    def get_final_price_formatted(self, obj):
+        return format_clp(obj.final_price)
+    
+    def get_discount_info(self, obj):
+        """Información de descuento formateada"""
+        if obj.discount_price:
+            return f"Precio fijo: {format_clp(obj.discount_price)}"
+        elif obj.discount_amount:
+            return f"Descuento: {format_clp(obj.discount_amount)}"
+        elif obj.discount_percent:
+            return f"Descuento: {obj.discount_percent}%"
+        return "Sin descuento"
 

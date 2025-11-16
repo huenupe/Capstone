@@ -1,0 +1,2 @@
+# Migrations for common app
+

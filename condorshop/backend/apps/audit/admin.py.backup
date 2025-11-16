@@ -1,11 +1,10 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils import timezone
-from datetime import timedelta
-import json
 from django.db.models import Count
 from django.db.models.functions import TruncDate
-
+from datetime import timedelta
+import json
 from .models import AuditLog
 
 
@@ -13,7 +12,7 @@ class CriticalTablesFilter(admin.SimpleListFilter):
     """Filtro personalizado para acciones críticas del negocio"""
     title = 'Tipo de operación'
     parameter_name = 'operation_type'
-
+    
     def lookups(self, request, model_admin):
         return (
             ('critical', '⚠️ Críticas (Orders + Products + Payments)'),
@@ -22,19 +21,19 @@ class CriticalTablesFilter(admin.SimpleListFilter):
             ('payments', '💳 Solo Payments'),
             ('inventory', '📊 Solo Inventory'),
         )
-
+    
     def queryset(self, request, queryset):
         if self.value() == 'critical':
             return queryset.filter(
-                table_name__in=['orders', 'order_items', 'products', 'payments', 'payment_transactions', 'carts']
+                table_name__in=['orders', 'order_items', 'products', 'payments', 'payment_transactions']
             )
-        if self.value() == 'orders':
+        elif self.value() == 'orders':
             return queryset.filter(table_name__in=['orders', 'order_items'])
-        if self.value() == 'products':
+        elif self.value() == 'products':
             return queryset.filter(table_name='products')
-        if self.value() == 'payments':
+        elif self.value() == 'payments':
             return queryset.filter(table_name__in=['payments', 'payment_transactions'])
-        if self.value() == 'inventory':
+        elif self.value() == 'inventory':
             return queryset.filter(table_name='inventory_movements')
         return queryset
 
@@ -43,7 +42,7 @@ class CriticalTablesFilter(admin.SimpleListFilter):
 class AuditLogAdmin(admin.ModelAdmin):
     # Template personalizado con dashboard
     change_list_template = 'admin/audit/auditlog_changelist.html'
-
+    
     # Campos a mostrar en el listado
     list_display = [
         'id',
@@ -54,7 +53,7 @@ class AuditLogAdmin(admin.ModelAdmin):
         'ip_address_display',
         'record_id',
     ]
-
+    
     # Filtros laterales
     list_filter = [
         CriticalTablesFilter,
@@ -62,7 +61,7 @@ class AuditLogAdmin(admin.ModelAdmin):
         ('created_at', admin.DateFieldListFilter),
         'table_name',
     ]
-
+    
     # Búsqueda
     search_fields = [
         'user__email',
@@ -70,7 +69,7 @@ class AuditLogAdmin(admin.ModelAdmin):
         'ip_address',
         'record_id',
     ]
-
+    
     # Campos de solo lectura en vista detalle
     readonly_fields = [
         'id',
@@ -83,34 +82,35 @@ class AuditLogAdmin(admin.ModelAdmin):
         'ip_address',
         'created_at',
     ]
-
+    
     # Configuración general
     list_per_page = 50
     ordering = ['-created_at']
-    date_hierarchy = 'created_at'
-
+    # date_hierarchy removido temporalmente debido a problemas con MySQL timezone
+    # Se puede reactivar cuando MySQL tenga timezone tables instaladas
+    
     # ===== PERMISOS (SOLO LECTURA) =====
-
+    
     def has_add_permission(self, request):
         """Bloquear creación manual - auditoría automática solamente"""
         return False
-
+    
     def has_change_permission(self, request, obj=None):
         """Bloquear edición - mantener integridad de auditoría"""
         return False
-
+    
     def has_delete_permission(self, request, obj=None):
         """Bloquear eliminación - requisito legal de trazabilidad"""
         return False
-
+    
     # ===== OPTIMIZACIÓN DE QUERIES =====
-
+    
     def get_queryset(self, request):
         """Optimizar con select_related para evitar N+1 queries"""
         return super().get_queryset(request).select_related('user')
-
+    
     # ===== COLUMNAS PERSONALIZADAS =====
-
+    
     def colored_action(self, obj):
         """Badge HTML con colores según tipo de acción"""
         badges = {
@@ -121,57 +121,50 @@ class AuditLogAdmin(admin.ModelAdmin):
             'UNKNOWN': '<span style="background: #6c757d; color: white; padding: 5px 12px; border-radius: 6px; font-weight: 600; display: inline-block; font-size: 11px; letter-spacing: 0.5px;">? UNKNOWN</span>',
         }
         return format_html(badges.get(obj.action, f'<span style="color: #6c757d;">{obj.action}</span>'))
-
     colored_action.short_description = 'Acción'
-
+    
     def table_name_badge(self, obj):
         """Tabla con badge de color según criticidad"""
-        critical_tables = ['orders', 'order_items', 'products', 'payments', 'payment_transactions', 'carts']
+        critical_tables = ['orders', 'order_items', 'products', 'payments', 'payment_transactions']
         if obj.table_name in critical_tables:
             return format_html(
                 '<span style="background: #fff3cd; color: #856404; padding: 4px 10px; border-radius: 4px; font-weight: 500; font-size: 12px;">⚠️ {}</span>',
-                obj.table_name,
+                obj.table_name
             )
         return format_html(
             '<span style="color: #495057; font-weight: 500;">{}</span>',
-            obj.table_name,
+            obj.table_name
         )
-
     table_name_badge.short_description = 'Tabla'
     table_name_badge.admin_order_field = 'table_name'
-
+    
     def user_display(self, obj):
         """Mostrar email del usuario o 'Anónimo' si no existe"""
         if obj.user:
             return format_html(
                 '<span style="color: #007bff; font-weight: 500;">{}</span>',
-                obj.user.email,
+                obj.user.email
             )
         return format_html('<em style="color: #6c757d;">Anónimo</em>')
-
     user_display.short_description = 'Usuario'
     user_display.admin_order_field = 'user__email'
-
+    
     def formatted_timestamp(self, obj):
         """Formato legible: 15 nov 2025, 14:30"""
         return obj.created_at.strftime('%d %b %Y, %H:%M')
-
     formatted_timestamp.short_description = 'Fecha y Hora'
     formatted_timestamp.admin_order_field = 'created_at'
-
+    
     def ip_address_display(self, obj):
-        """Muestra IP con icono (oculta localhost para demo)"""
-        if obj.ip_address == '127.0.0.1':
-            return format_html('<span style="color: #999; font-style: italic;">localhost</span>')
+        """Mostrar IP o 'No registrada'"""
         if obj.ip_address:
             return format_html(
                 '<code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px; font-size: 12px;">{}</code>',
-                obj.ip_address,
+                obj.ip_address
             )
         return format_html('<em style="color: #6c757d;">No registrada</em>')
-
     ip_address_display.short_description = 'IP'
-
+    
     def formatted_old_values(self, obj):
         """JSON formateado con indentación y colores"""
         if not obj.old_values:
@@ -180,16 +173,15 @@ class AuditLogAdmin(admin.ModelAdmin):
             formatted = json.dumps(obj.old_values, indent=2, ensure_ascii=False, sort_keys=True)
             return format_html(
                 '<pre style="background: #f8f9fa; padding: 12px; border-radius: 6px; border-left: 4px solid #dc3545; overflow-x: auto; font-size: 13px; line-height: 1.5;">{}</pre>',
-                formatted,
+                formatted
             )
-        except Exception as exc:
+        except Exception as e:
             return format_html(
                 '<span style="color: #dc3545;">Error al formatear JSON: {}</span>',
-                str(exc),
+                str(e)
             )
-
     formatted_old_values.short_description = '📄 Valores Anteriores (JSON)'
-
+    
     def formatted_new_values(self, obj):
         """JSON formateado con indentación y colores"""
         if not obj.new_values:
@@ -198,86 +190,71 @@ class AuditLogAdmin(admin.ModelAdmin):
             formatted = json.dumps(obj.new_values, indent=2, ensure_ascii=False, sort_keys=True)
             return format_html(
                 '<pre style="background: #f8f9fa; padding: 12px; border-radius: 6px; border-left: 4px solid #28a745; overflow-x: auto; font-size: 13px; line-height: 1.5;">{}</pre>',
-                formatted,
+                formatted
             )
-        except Exception as exc:
+        except Exception as e:
             return format_html(
                 '<span style="color: #dc3545;">Error al formatear JSON: {}</span>',
-                str(exc),
+                str(e)
             )
-
     formatted_new_values.short_description = '📄 Valores Nuevos (JSON)'
-
+    
     # ===== DATOS PARA DASHBOARD =====
-
+    
     def changelist_view(self, request, extra_context=None):
         """Agregar métricas y datos para gráficos del dashboard"""
         try:
-            # Calcular rango de 7 días
+            # Calcular rango de 7 días (timezone-aware)
             seven_days_ago = timezone.now() - timedelta(days=7)
-
-            # OPTIMIZACIÓN: Una sola query para obtener todos los datos de los últimos 7 días
-            recent_logs = AuditLog.objects.filter(created_at__gte=seven_days_ago).select_related('user')
             
             # Métrica 1: Total de acciones últimos 7 días
-            total_actions = recent_logs.count()
-
-            # Métrica 2: Acciones críticas últimos 7 días (usando la misma queryset)
-            critical_tables = ['orders', 'order_items', 'products', 'payments', 'payment_transactions', 'carts']
-            critical_actions = recent_logs.filter(table_name__in=critical_tables).count()
-
-            # Métrica 3: Usuarios únicos activos últimos 7 días (usando la misma queryset)
-            unique_users = recent_logs.filter(user__isnull=False).values('user').distinct().count()
-
-            # OPTIMIZACIÓN: Obtener todos los datos diarios en una sola query
-            daily_counts = {}
+            total_actions = AuditLog.objects.filter(
+                created_at__gte=seven_days_ago
+            ).count()
+            
+            # Métrica 2: Acciones críticas últimos 7 días
+            critical_actions = AuditLog.objects.filter(
+                created_at__gte=seven_days_ago,
+                table_name__in=[
+                    'orders', 'order_items', 'products', 
+                    'payments', 'payment_transactions'
+                ]
+            ).count()
+            
+            # Métrica 3: Usuarios únicos activos últimos 7 días
+            unique_users = AuditLog.objects.filter(
+                created_at__gte=seven_days_ago,
+                user__isnull=False
+            ).values('user').distinct().count()
+            
+            # Datos para gráfico: Garantizar 7 días de datos (incluso si count=0)
+            # Usar TruncDate para evitar problemas con timezone en MySQL
+            daily_data = []
             for i in range(7):
-                date = (timezone.now() - timedelta(days=6 - i)).date()
-                daily_counts[date] = 0  # Inicializar con 0
+                target_date = timezone.now() - timedelta(days=6-i)
+                # Usar TruncDate para extraer solo la fecha sin problemas de timezone
+                count = AuditLog.objects.filter(
+                    created_at__gte=target_date.replace(hour=0, minute=0, second=0, microsecond=0),
+                    created_at__lt=(target_date + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                ).count()
+                daily_data.append({
+                    'date': target_date.strftime('%d %b'),  # "15 nov"
+                    'count': count
+                })
             
-            # Query optimizada: obtener conteos por fecha en una sola query
-            daily_stats = (
-                recent_logs
-                .annotate(date=TruncDate('created_at'))
-                .values('date')
-                .annotate(count=Count('id'))
-            )
+            # Datos para gráfico de acciones por tipo
+            action_stats = AuditLog.objects.filter(
+                created_at__gte=seven_days_ago
+            ).values('action').annotate(
+                count=Count('id')
+            ).order_by('-count')
             
-            for stat in daily_stats:
-                if stat['date'] in daily_counts:
-                    daily_counts[stat['date']] = stat['count']
-            
-            daily_data = [
-                {
-                    'date': date.strftime('%d %b'),
-                    'count': daily_counts[date],
-                }
-                for date in sorted(daily_counts.keys())
-            ]
-
-            # Datos para gráfico de acciones por tipo (ya optimizado con annotate)
-            action_stats = (
-                recent_logs
-                .values('action')
-                .annotate(count=Count('id'))
-                .order_by('-count')
-            )
-
             action_labels = [stat['action'] for stat in action_stats]
             action_counts = [stat['count'] for stat in action_stats]
-        except Exception as e:
-            # Si hay error, usar valores por defecto para no romper el admin
-            total_actions = 0
-            critical_actions = 0
-            unique_users = 0
-            daily_data = [{'date': '', 'count': 0} for _ in range(7)]
-            action_labels = []
-            action_counts = []
-
-        # Agregar al contexto
-        extra_context = extra_context or {}
-        extra_context.update(
-            {
+            
+            # Agregar al contexto
+            extra_context = extra_context or {}
+            extra_context.update({
                 'total_actions': total_actions,
                 'critical_actions': critical_actions,
                 'unique_users': unique_users,
@@ -285,7 +262,68 @@ class AuditLogAdmin(admin.ModelAdmin):
                 'daily_actions_data': json.dumps([d['count'] for d in daily_data]),
                 'action_labels': json.dumps(action_labels),
                 'action_counts': json.dumps(action_counts),
-            }
-        )
-
+            })
+        except Exception as e:
+            # Si hay error, usar valores por defecto para que el admin siga funcionando
+            extra_context = extra_context or {}
+            extra_context.update({
+                'total_actions': 0,
+                'critical_actions': 0,
+                'unique_users': 0,
+                'daily_actions_labels': json.dumps([]),
+                'daily_actions_data': json.dumps([]),
+                'action_labels': json.dumps([]),
+                'action_counts': json.dumps([]),
+                'dashboard_error': str(e),
+            })
+        
         return super().changelist_view(request, extra_context=extra_context)
+
+from django.contrib import admin
+from .models import AuditLog
+
+
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'action', 'table_name', 'record_id', 'ip_address', 'created_at')
+    list_filter = ('action', 'table_name', 'created_at')
+    search_fields = ('user__email', 'table_name', 'action')
+    readonly_fields = ('id', 'user', 'action', 'table_name', 'record_id', 
+                      'old_values', 'new_values', 'ip_address', 'created_at')
+    
+    def user(self, obj):
+        return obj.user.email if obj.user else 'Anónimo'
+    user.short_description = 'Usuario'
+    user.admin_order_field = 'user__email'
+    
+    def action(self, obj):
+        return obj.action
+    action.short_description = 'Acción'
+    action.admin_order_field = 'action'
+    
+    def table_name(self, obj):
+        return obj.table_name
+    table_name.short_description = 'Nombre de tabla'
+    table_name.admin_order_field = 'table_name'
+    
+    def record_id(self, obj):
+        return obj.record_id or '-'
+    record_id.short_description = 'ID del registro'
+    record_id.admin_order_field = 'record_id'
+    
+    def ip_address(self, obj):
+        return obj.ip_address or '-'
+    ip_address.short_description = 'Dirección IP'
+    ip_address.admin_order_field = 'ip_address'
+    
+    def created_at(self, obj):
+        return obj.created_at.strftime('%d de %B de %Y a las %H:%M') if obj.created_at else '-'
+    created_at.short_description = 'Creado el'
+    created_at.admin_order_field = 'created_at'
+    
+    def has_add_permission(self, request):
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        return False
+

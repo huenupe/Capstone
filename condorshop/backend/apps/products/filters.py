@@ -1,9 +1,9 @@
 import django_filters
-from .models import Product
+from .models import Product, Category
 
 
 class ProductFilter(django_filters.FilterSet):
-    category = django_filters.CharFilter(method='filter_category')
+    category = django_filters.NumberFilter(method='filter_by_category_tree')
     min_price = django_filters.NumberFilter(field_name='price', lookup_expr='gte')
     max_price = django_filters.NumberFilter(field_name='price', lookup_expr='lte')
     active = django_filters.BooleanFilter(field_name='active')
@@ -12,18 +12,24 @@ class ProductFilter(django_filters.FilterSet):
         model = Product
         fields = {
             'name': ['istartswith'],
+            'category': ['exact'],
+            'active': ['exact'],
         }
 
-    def filter_category(self, queryset, name, value):
+    def filter_by_category_tree(self, queryset, name, value):
         """
-        Permitir filtrar por ID numérico o por slug de la categoría.
+        Filtra productos por categoría incluyendo todas sus subcategorías.
+        Si filtras por 'Electrónica', incluye productos de 'Laptops', 'Celulares', etc.
         """
         if value is None or value == '':
             return queryset
-        # Si el valor es estrictamente numérico, usar category_id
-        if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit()):
-            return queryset.filter(category_id=int(value))
-
-        # De lo contrario, filtrar por slug
-        return queryset.filter(category__slug=value)
+        
+        try:
+            category = Category.objects.get(id=value)
+            # Obtener esta categoría + todos sus descendientes
+            categories = [category] + category.get_descendants()
+            category_ids = [cat.id for cat in categories]
+            return queryset.filter(category_id__in=category_ids)
+        except Category.DoesNotExist:
+            return queryset.none()
 

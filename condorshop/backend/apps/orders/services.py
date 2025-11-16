@@ -7,7 +7,7 @@ from django.core.mail import send_mail
 
 from apps.products.models import Product
 
-from .models import ShippingRule, ShippingZone
+from .models import ShippingRule, ShippingZone, ShippingCarrier
 
 
 DEFAULT_FREE_SHIPPING_THRESHOLD = 50000
@@ -65,19 +65,52 @@ def _extract_product_context(cart_items: Sequence) -> tuple[list[int], Set[int]]
     return product_ids, category_ids
 
 
+def _calculate_total_weight(cart_items: Optional[Iterable]) -> float:
+    """Calcula el peso total de los items del carrito en kg"""
+    if not cart_items:
+        return 0.0
+    
+    total_weight = 0.0
+    for item in cart_items:
+        product = getattr(item, "product", None)
+        
+        if isinstance(item, dict):
+            product_id = item.get("product_id")
+            quantity = item.get("quantity", 1)
+        else:
+            product_id = getattr(item, "product_id", None)
+            quantity = getattr(item, "quantity", 1)
+        
+        if not product_id:
+            continue
+        
+        if not product:
+            try:
+                product = Product.objects.get(id=product_id)
+            except Product.DoesNotExist:
+                continue
+        
+        weight = float(product.weight or 0)
+        total_weight += weight * quantity
+    
+    return total_weight
+
+
 def evaluate_shipping(region: Optional[str], subtotal, cart_items: Optional[Iterable]) -> dict:
     """
     Determinar costo de envío y metadatos relevantes reutilizables en el checkout.
+    Usa la nueva estructura de ShippingRule con carrier, peso y criterios múltiples.
 
     Retorna un diccionario con las llaves:
     - cost (int)
     - free_shipping_threshold (int | None)
     - zone (str | None)
-    - rule_type (str)
+    - carrier (str | None)
     - applied_rule_id (int | None)
     """
 
     subtotal_int = _to_int(subtotal)
+    total_weight = _calculate_total_weight(cart_items)
 
     if not region or not cart_items:
         cost = 0 if subtotal_int >= DEFAULT_FREE_SHIPPING_THRESHOLD else DEFAULT_SHIPPING_COST
@@ -85,7 +118,7 @@ def evaluate_shipping(region: Optional[str], subtotal, cart_items: Optional[Iter
             "cost": cost,
             "free_shipping_threshold": DEFAULT_FREE_SHIPPING_THRESHOLD,
             "zone": None,
-            "rule_type": "DEFAULT",
+            "carrier": None,
             "applied_rule_id": None,
         }
 
@@ -95,48 +128,32 @@ def evaluate_shipping(region: Optional[str], subtotal, cart_items: Optional[Iter
         regions__icontains=region,
     ).first()
 
-    rules_qs = ShippingRule.objects.filter(is_active=True).select_related(
-        "zone", "product__category", "category"
-    )
+    # Obtener reglas activas ordenadas por prioridad
+    rules_qs = ShippingRule.objects.filter(
+        is_active=True,
+        carrier__is_active=True
+    ).select_related('carrier', 'zone').order_by('-priority', 'base_cost')
+
+    # Filtrar por zona si existe
     if zone:
         rules_qs = rules_qs.filter(zone__in=[zone, None])
     else:
         rules_qs = rules_qs.filter(zone__isnull=True)
 
-    rules_qs = rules_qs.order_by("-priority", "-created_at")
-
-    product_ids, category_ids = _extract_product_context(list(cart_items))
-    product_id_set = set(product_ids)
-    category_id_set = set(category_ids)
-
+    # Buscar la primera regla que aplique
     applied_rule = None
-    category_rule = None
-    all_rule = None
-
     for rule in rules_qs:
-        if rule.rule_type == "PRODUCT" and rule.product_id in product_id_set:
+        if rule.applies_to(zone, subtotal_int, total_weight):
             applied_rule = rule
             break
-        if rule.rule_type == "CATEGORY" and rule.category_id in category_id_set and category_rule is None:
-            category_rule = rule
-        if rule.rule_type == "ALL" and all_rule is None:
-            all_rule = rule
-
-    if not applied_rule:
-        applied_rule = category_rule or all_rule
 
     if applied_rule:
-        threshold = applied_rule.free_shipping_threshold
-        if threshold and subtotal_int >= threshold:
-            cost = 0
-        else:
-            cost = applied_rule.base_cost
-
+        cost = applied_rule.calculate_cost(subtotal_int, total_weight)
         return {
             "cost": cost,
-            "free_shipping_threshold": threshold,
+            "free_shipping_threshold": applied_rule.free_shipping_threshold,
             "zone": zone.name if zone else None,
-            "rule_type": applied_rule.rule_type,
+            "carrier": applied_rule.carrier.name if applied_rule.carrier else None,
             "applied_rule_id": applied_rule.id,
         }
 
@@ -146,7 +163,7 @@ def evaluate_shipping(region: Optional[str], subtotal, cart_items: Optional[Iter
         "cost": cost,
         "free_shipping_threshold": DEFAULT_FREE_SHIPPING_THRESHOLD,
         "zone": zone.name if zone else None,
-        "rule_type": "DEFAULT",
+        "carrier": None,
         "applied_rule_id": None,
     }
 
@@ -156,9 +173,16 @@ def send_order_confirmation_email(order):
     Prepara el envío de email de confirmación de pedido
     Se completará cuando se integre Webpay
     """
+    # Obtener datos del cliente desde shipping_snapshot
+    customer_name = ''
+    customer_email = ''
+    if order.shipping_snapshot:
+        customer_name = order.shipping_snapshot.customer_name or ''
+        customer_email = order.shipping_snapshot.customer_email or ''
+    
     subject = f'Confirmación de pedido #{order.id} - CondorShop'
     message = f"""
-    Hola {order.customer_name},
+    Hola {customer_name},
 
     Tu pedido #{order.id} ha sido confirmado.
 
@@ -176,7 +200,7 @@ def send_order_confirmation_email(order):
     #     subject=subject,
     #     message=message,
     #     from_email=settings.DEFAULT_FROM_EMAIL,
-    #     recipient_list=[order.customer_email],
+    #     recipient_list=[customer_email],
     #     fail_silently=False,
     # )
 

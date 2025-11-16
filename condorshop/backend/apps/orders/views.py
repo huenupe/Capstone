@@ -26,7 +26,8 @@ def get_shipping_quote(region, subtotal, cart_items):
         'cost': int(evaluation['cost']),
         'free_shipping_threshold': int(threshold) if threshold is not None else None,
         'zone': evaluation['zone'],
-        'rule_type': evaluation['rule_type'],
+        'carrier': evaluation.get('carrier'),
+        'applied_rule_id': evaluation.get('applied_rule_id'),
     }
 
 
@@ -157,7 +158,6 @@ def create_order(request):
         )
 
     cart_items = list(cart_items_qs)
-    products_to_update = []
     item_payloads = []
     subtotal = 0
 
@@ -177,32 +177,56 @@ def create_order(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    for cart_item in cart_items:
-        product = products_map[cart_item.product_id]
-        if product.stock_qty < cart_item.quantity:
-            return Response(
-                {
-                    'error': f'Stock insuficiente para {product.name}',
-                    'available': product.stock_qty,
-                    'required': cart_item.quantity
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        product.stock_qty -= cart_item.quantity
-        products_to_update.append(product)
+    # ANTES de crear Order, reservar stock
+    reserved_products = []  # Para liberar si falla
+    
+    try:
+        with transaction.atomic():
+            for cart_item in cart_items:
+                product = products_map[cart_item.product_id]
+                
+                # Reservar stock (con validación)
+                try:
+                    product.reserve_stock(
+                        quantity=cart_item.quantity,
+                        reason='Order pending',
+                        reference_id=None  # Se actualizará después de crear Order
+                    )
+                    reserved_products.append((product, cart_item.quantity))
+                except ValidationError as e:
+                    # Liberar reservas anteriores si falla
+                    for prev_product, prev_quantity in reserved_products:
+                        try:
+                            prev_product.release_stock(prev_quantity, reason='Order creation failed')
+                        except Exception:
+                            pass
+                    return Response(
+                        {'error': str(e)},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                unit_price = int(product.final_price)
+                quantity = int(cart_item.quantity)
+                total_price = unit_price * quantity
+                subtotal += total_price
 
-        unit_price = int(product.final_price)
-        quantity = int(cart_item.quantity)
-        total_price = unit_price * quantity
-        subtotal += total_price
-
-        item_payloads.append({
-            'product': product,
-            'quantity': quantity,
-            'unit_price': unit_price,
-            'total_price': total_price,
-        })
+                item_payloads.append({
+                    'product': product,
+                    'quantity': quantity,
+                    'unit_price': unit_price,
+                    'total_price': total_price,
+                })
+    except Exception as e:
+        # Liberar todas las reservas si hay error
+        for prev_product, prev_quantity in reserved_products:
+            try:
+                prev_product.release_stock(prev_quantity, reason='Order creation failed')
+            except Exception:
+                pass
+        return Response(
+            {'error': f'Error al reservar stock: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
     shipping_region = serializer.validated_data.get('shipping_region', '')
     shipping_cost = int(calculate_shipping_cost(subtotal, shipping_region, cart_items))
@@ -211,32 +235,110 @@ def create_order(request):
     # Obtener estado PENDING
     pending_status = OrderStatus.objects.get(code='PENDING')
 
-    # Crear orden
-    order_data = serializer.validated_data
-    order = Order.objects.create(
-        user=request.user if request.user.is_authenticated else None,
-        status=pending_status,
-        total_amount=total_amount,
-        shipping_cost=shipping_cost,
-        **order_data
+    # NUEVO: Crear snapshot de envío antes de crear Order
+    from apps.orders.models import OrderShippingSnapshot
+    from apps.users.models import Address
+    
+    snapshot_data = serializer.validated_data.copy()
+    
+    # Obtener datos del usuario si está autenticado
+    original_user = request.user if request.user.is_authenticated else None
+    original_address = None
+    
+    if original_user:
+        # Intentar obtener dirección guardada si existe
+        address_label = serializer.validated_data.get('address_label')
+        if address_label:
+            try:
+                original_address = Address.objects.get(
+                    user=original_user,
+                    label=address_label
+                )
+            except Address.DoesNotExist:
+                pass
+        
+        # Si no hay dirección guardada, intentar obtener datos del usuario
+        if not snapshot_data.get('customer_name') and original_user:
+            snapshot_data['customer_name'] = (
+                original_user.get_full_name() or 
+                original_user.username or 
+                original_user.email
+            )
+        if not snapshot_data.get('customer_email') and original_user:
+            snapshot_data['customer_email'] = original_user.email
+        if not snapshot_data.get('customer_phone') and hasattr(original_user, 'phone'):
+            snapshot_data['customer_phone'] = original_user.phone or ''
+    
+    # Crear snapshot
+    shipping_snapshot = OrderShippingSnapshot.objects.create(
+        customer_name=snapshot_data['customer_name'],
+        customer_email=snapshot_data['customer_email'],
+        customer_phone=snapshot_data.get('customer_phone', ''),
+        shipping_street=snapshot_data['shipping_street'],
+        shipping_city=snapshot_data['shipping_city'],
+        shipping_region=snapshot_data['shipping_region'],
+        shipping_postal_code=snapshot_data.get('shipping_postal_code', ''),
+        shipping_country='Chile',
+        original_user=original_user,
+        original_address=original_address
     )
 
-    # Crear items de la orden
-    order_items = [
-        OrderItem(
+    # Crear orden vinculada al snapshot
+    order = Order.objects.create(
+        user=original_user,
+        status=pending_status,
+        shipping_snapshot=shipping_snapshot,
+        total_amount=total_amount,
+        shipping_cost=shipping_cost,
+        currency='CLP'
+    )
+
+    # Crear items de la orden con snapshots
+    from apps.orders.models import OrderItemSnapshot
+    
+    order_items = []
+    for payload in item_payloads:
+        product = payload['product']
+        
+        # Crear snapshot del producto
+        product_category_name = product.category.name if product.category else None
+        price_snapshot = OrderItemSnapshot.objects.create(
+            product_name=product.name,
+            product_sku=product.sku,
+            product_id=product.id,
+            unit_price=payload['unit_price'],
+            total_price=payload['total_price'],
+            product_brand=product.brand,
+            product_category_name=product_category_name,
+        )
+        
+        # Crear item vinculado al snapshot
+        order_item = OrderItem(
             order=order,
-            product=payload['product'],
+            product=product,
             quantity=payload['quantity'],
             unit_price=payload['unit_price'],
             total_price=payload['total_price'],
+            price_snapshot=price_snapshot,
         )
-        for payload in item_payloads
-    ]
+        order_items.append(order_item)
+    
     OrderItem.objects.bulk_create(order_items)
 
-    # Actualizar stock de productos
-    for product in products_to_update:
-        product.save()
+    # Después de crear Order, actualizar reference_id en movimientos de inventario
+    from apps.products.models import InventoryMovement
+    for item in order_items:
+        try:
+            movements = item.product.inventory_movements.filter(
+                movement_type='reserve',
+                reference_id__isnull=True
+            ).order_by('-created_at')[:1]
+            for movement in movements:
+                movement.reference_id = order.id
+                movement.reference_type = 'order'
+                movement.save()
+        except Exception:
+            pass
 
     # Registrar historial de estado
     from .models import OrderStatusHistory
@@ -252,16 +354,15 @@ def create_order(request):
     cart.save()
     
     # Guardar dirección si el usuario está autenticado y lo solicitó
-    if request.user.is_authenticated and serializer.validated_data.get('save_address'):
+    if original_user and serializer.validated_data.get('save_address'):
         try:
-            from apps.users.models import Address
             address_data = {
-                'user': request.user,
+                'user': original_user,
                 'label': serializer.validated_data.get('address_label') or None,
-                'street': serializer.validated_data['shipping_street'],
-                'city': serializer.validated_data['shipping_city'],
-                'region': serializer.validated_data['shipping_region'],
-                'postal_code': serializer.validated_data.get('shipping_postal_code') or None,
+                'street': snapshot_data['shipping_street'],
+                'city': snapshot_data['shipping_city'],
+                'region': snapshot_data['shipping_region'],
+                'postal_code': snapshot_data.get('shipping_postal_code') or None,
                 'is_default': False  # No marcar como default automáticamente
             }
             # Extraer número y apartamento si están en la calle (opcional)

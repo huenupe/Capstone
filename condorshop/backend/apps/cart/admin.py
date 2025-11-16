@@ -16,6 +16,11 @@ class CartAdmin(admin.ModelAdmin):
     inlines = [CartItemInline]
     search_fields = ('user__email', 'session_token')
     
+    def get_queryset(self, request):
+        """Optimizar queries con select_related y prefetch_related"""
+        qs = super().get_queryset(request)
+        return qs.select_related('user').prefetch_related('items__product')
+    
     def user(self, obj):
         return obj.user.email if obj.user else '-'
     user.short_description = 'Usuario'

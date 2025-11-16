@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from apps.common.utils import format_clp
-from .models import Order, OrderItem, OrderStatus, OrderStatusHistory
+from .models import Order, OrderItem, OrderStatus, OrderStatusHistory, PaymentTransaction
 from apps.products.serializers import ProductListSerializer
 
 
@@ -13,10 +13,14 @@ class OrderStatusSerializer(serializers.ModelSerializer):
 
 class OrderItemSerializer(serializers.ModelSerializer):
     product = ProductListSerializer(read_only=True)
-    unit_price = serializers.IntegerField(read_only=True)
-    total_price = serializers.IntegerField(read_only=True)
+    # Precios desde snapshot si existe, sino desde el item
+    unit_price = serializers.SerializerMethodField()
+    total_price = serializers.SerializerMethodField()
     unit_price_formatted = serializers.SerializerMethodField()
     total_price_formatted = serializers.SerializerMethodField()
+    # Información del producto desde snapshot (para historial)
+    product_name_snapshot = serializers.SerializerMethodField()
+    product_sku_snapshot = serializers.SerializerMethodField()
 
     class Meta:
         model = OrderItem
@@ -28,13 +32,41 @@ class OrderItemSerializer(serializers.ModelSerializer):
             'total_price',
             'unit_price_formatted',
             'total_price_formatted',
+            'product_name_snapshot',
+            'product_sku_snapshot',
         )
 
+    def get_unit_price(self, obj):
+        """Obtener precio unitario desde snapshot si existe, sino desde el item."""
+        if obj.price_snapshot:
+            return obj.price_snapshot.unit_price
+        return obj.unit_price
+
+    def get_total_price(self, obj):
+        """Obtener precio total desde snapshot si existe, sino desde el item."""
+        if obj.price_snapshot:
+            return obj.price_snapshot.total_price
+        return obj.total_price
+
     def get_unit_price_formatted(self, obj):
-        return format_clp(obj.unit_price)
+        unit_price = self.get_unit_price(obj)
+        return format_clp(unit_price)
 
     def get_total_price_formatted(self, obj):
-        return format_clp(obj.total_price)
+        total_price = self.get_total_price(obj)
+        return format_clp(total_price)
+    
+    def get_product_name_snapshot(self, obj):
+        """Obtener nombre del producto desde snapshot si existe."""
+        if obj.price_snapshot:
+            return obj.price_snapshot.product_name
+        return obj.product.name if obj.product else None
+    
+    def get_product_sku_snapshot(self, obj):
+        """Obtener SKU del producto desde snapshot si existe."""
+        if obj.price_snapshot:
+            return obj.price_snapshot.product_sku
+        return obj.product.sku if obj.product and hasattr(obj.product, 'sku') else None
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -44,6 +76,37 @@ class OrderSerializer(serializers.ModelSerializer):
     shipping_cost = serializers.IntegerField(read_only=True)
     total_amount_formatted = serializers.SerializerMethodField()
     shipping_cost_formatted = serializers.SerializerMethodField()
+    
+    # Mantener campos en respuesta para compatibilidad con frontend
+    # Estos campos ahora vienen del shipping_snapshot
+    customer_name = serializers.SerializerMethodField()
+    customer_email = serializers.SerializerMethodField()
+    customer_phone = serializers.SerializerMethodField()
+    shipping_street = serializers.SerializerMethodField()
+    shipping_city = serializers.SerializerMethodField()
+    shipping_region = serializers.SerializerMethodField()
+    shipping_postal_code = serializers.SerializerMethodField()
+    
+    def get_customer_name(self, obj):
+        return obj.shipping_snapshot.customer_name if obj.shipping_snapshot else ''
+    
+    def get_customer_email(self, obj):
+        return obj.shipping_snapshot.customer_email if obj.shipping_snapshot else ''
+    
+    def get_customer_phone(self, obj):
+        return obj.shipping_snapshot.customer_phone if obj.shipping_snapshot else ''
+    
+    def get_shipping_street(self, obj):
+        return obj.shipping_snapshot.shipping_street if obj.shipping_snapshot else ''
+    
+    def get_shipping_city(self, obj):
+        return obj.shipping_snapshot.shipping_city if obj.shipping_snapshot else ''
+    
+    def get_shipping_region(self, obj):
+        return obj.shipping_snapshot.shipping_region if obj.shipping_snapshot else ''
+    
+    def get_shipping_postal_code(self, obj):
+        return obj.shipping_snapshot.shipping_postal_code if obj.shipping_snapshot else ''
 
     class Meta:
         model = Order
@@ -83,6 +146,8 @@ class CreateOrderSerializer(serializers.Serializer):
     shipping_city = serializers.CharField(max_length=100)
     shipping_region = serializers.CharField(max_length=100)
     shipping_postal_code = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    save_address = serializers.BooleanField(required=False, default=False)
+    address_label = serializers.CharField(max_length=100, required=False, allow_blank=True)
 
 
 class OrderStatusHistorySerializer(serializers.ModelSerializer):
@@ -108,6 +173,36 @@ class OrderAdminSerializer(serializers.ModelSerializer):
     shipping_cost = serializers.IntegerField(read_only=True)
     total_amount_formatted = serializers.SerializerMethodField()
     shipping_cost_formatted = serializers.SerializerMethodField()
+    
+    # Campos desde shipping_snapshot para compatibilidad
+    customer_name = serializers.SerializerMethodField()
+    customer_email = serializers.SerializerMethodField()
+    customer_phone = serializers.SerializerMethodField()
+    shipping_street = serializers.SerializerMethodField()
+    shipping_city = serializers.SerializerMethodField()
+    shipping_region = serializers.SerializerMethodField()
+    shipping_postal_code = serializers.SerializerMethodField()
+    
+    def get_customer_name(self, obj):
+        return obj.shipping_snapshot.customer_name if obj.shipping_snapshot else ''
+    
+    def get_customer_email(self, obj):
+        return obj.shipping_snapshot.customer_email if obj.shipping_snapshot else ''
+    
+    def get_customer_phone(self, obj):
+        return obj.shipping_snapshot.customer_phone if obj.shipping_snapshot else ''
+    
+    def get_shipping_street(self, obj):
+        return obj.shipping_snapshot.shipping_street if obj.shipping_snapshot else ''
+    
+    def get_shipping_city(self, obj):
+        return obj.shipping_snapshot.shipping_city if obj.shipping_snapshot else ''
+    
+    def get_shipping_region(self, obj):
+        return obj.shipping_snapshot.shipping_region if obj.shipping_snapshot else ''
+    
+    def get_shipping_postal_code(self, obj):
+        return obj.shipping_snapshot.shipping_postal_code if obj.shipping_snapshot else ''
 
     class Meta:
         model = Order
@@ -145,3 +240,36 @@ class OrderAdminSerializer(serializers.ModelSerializer):
     def get_shipping_cost_formatted(self, obj):
         return format_clp(obj.shipping_cost)
 
+
+class PaymentTransactionSerializer(serializers.ModelSerializer):
+    """Serializer para transacciones de pago (solo campos seguros)"""
+    masked_card = serializers.SerializerMethodField()
+    payment_method_display = serializers.CharField(source='get_payment_method_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    
+    class Meta:
+        model = PaymentTransaction
+        fields = [
+            'id',
+            'order',
+            'payment_method',
+            'payment_method_display',
+            'status',
+            'status_display',
+            'amount',
+            'currency',
+            'masked_card',
+            'card_brand',
+            'webpay_authorization_code',
+            'webpay_transaction_date',
+            'created_at',
+            'updated_at'
+        ]
+        read_only_fields = ('id', 'created_at', 'updated_at')
+    
+    def get_masked_card(self, obj):
+        """Retorna tarjeta enmascarada: **** 1234"""
+        if obj.card_last_four:
+            brand = f" ({obj.card_brand})" if obj.card_brand else ""
+            return f"**** {obj.card_last_four}{brand}"
+        return None

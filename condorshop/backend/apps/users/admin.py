@@ -1,5 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.models import Group
+
 from .models import User, PasswordResetToken, Address
 
 
@@ -70,6 +72,11 @@ class PasswordResetTokenAdmin(admin.ModelAdmin):
     search_fields = ('user__email', 'token')
     readonly_fields = ('token', 'created_at', 'expires_at', 'used_at')
     ordering = ('-created_at',)
+    
+    def get_queryset(self, request):
+        """Optimizar queries con select_related"""
+        qs = super().get_queryset(request)
+        return qs.select_related('user')
 
     def user_email(self, obj):
         return obj.user.email if obj.user else '-'
@@ -110,6 +117,11 @@ class AddressAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at', 'updated_at')
     ordering = ('-is_default', '-created_at')
     
+    def get_queryset(self, request):
+        """Optimizar queries con select_related"""
+        qs = super().get_queryset(request)
+        return qs.select_related('user')
+    
     fieldsets = (
         ('Usuario', {
             'fields': ('user',)
@@ -132,4 +144,15 @@ class AddressAdmin(admin.ModelAdmin):
         return obj.created_at.strftime('%d de %B de %Y a las %H:%M') if obj.created_at else '-'
     created_at.short_description = 'Creado el'
     created_at.admin_order_field = 'created_at'
+
+
+# ===== LIMPIEZA DE ADMIN POR DEFECTO (AUTH.GROUP) =====
+
+# Eliminar completamente la sección "Autenticación y Autorización" basada en Group.
+# Mantenemos permisos y el modelo User custom, pero removemos Group para simplificar el admin.
+try:
+    admin.site.unregister(Group)
+except admin.sites.NotRegistered:
+    # Si por alguna razón Group ya no está registrado, ignorar silenciosamente.
+    pass
 

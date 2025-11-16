@@ -4,11 +4,13 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
-from .models import Product, Category
+from apps.common.utils import format_clp
+from .models import Product, Category, ProductPriceHistory
 from .serializers import (
     ProductListSerializer, 
     ProductDetailSerializer,
-    CategorySerializer
+    CategorySerializer,
+    ProductPriceHistorySerializer
 )
 from .filters import ProductFilter
 
@@ -47,14 +49,66 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
                 Q(name__icontains=search) | Q(description__icontains=search)
             )
         return queryset
+    
+    @action(detail=True, methods=['get'], url_path='price-history')
+    def price_history(self, request, slug=None):
+        """
+        Endpoint opcional para consultar historial de precios de un producto.
+        GET /api/products/{slug}/price-history/
+        """
+        product = get_object_or_404(Product, slug=slug, active=True)
+        history = ProductPriceHistory.objects.filter(product=product).order_by('-effective_from')
+        
+        # Opcional: limitar cantidad de registros
+        limit = request.query_params.get('limit', None)
+        if limit:
+            try:
+                limit = int(limit)
+                history = history[:limit]
+            except ValueError:
+                pass
+        
+        serializer = ProductPriceHistorySerializer(history, many=True, context={'request': request})
+        return Response({
+            'product': {
+                'id': product.id,
+                'name': product.name,
+                'sku': product.sku,
+                'current_price': product.final_price,
+                'current_price_formatted': format_clp(product.final_price)
+            },
+            'history': serializer.data,
+            'total_records': history.count()
+        })
 
 
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet para categorías
-    GET /api/products/categories/ - Listado de categorías
+    GET /api/products/categories/ - Listado de categorías con jerarquía
+    GET /api/products/categories/{id}/ - Detalle de categoría con subcategorías
     """
-    queryset = Category.objects.all()
+    queryset = Category.objects.select_related('parent_category').prefetch_related('subcategories')
     serializer_class = CategorySerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    def get_queryset(self):
+        """Optimizar queries con jerarquía"""
+        queryset = super().get_queryset()
+        # Opcional: filtrar solo categorías raíz si se solicita
+        root_only = self.request.query_params.get('root_only', None)
+        if root_only and root_only.lower() == 'true':
+            queryset = queryset.filter(parent_category__isnull=True)
+        return queryset
+    
+    @action(detail=True, methods=['get'], url_path='price-history')
+    def price_history(self, request, pk=None):
+        """
+        Endpoint opcional para consultar historial de precios de un producto.
+        GET /api/products/categories/{id}/price-history/
+        """
+        category = get_object_or_404(Category, pk=pk)
+        # Este endpoint es para categorías, pero el historial es de productos
+        # Por ahora retornamos vacío, pero se puede extender si es necesario
+        return Response({'message': 'Use /api/products/{product_id}/price-history/ instead'}, status=status.HTTP_400_BAD_REQUEST)
 

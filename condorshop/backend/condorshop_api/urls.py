@@ -6,6 +6,7 @@ from django.contrib.auth.views import redirect_to_login
 from django.urls import path, include, reverse
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.static import serve
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
 from django.db import connection
@@ -94,7 +95,21 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    # Servir archivos media con headers de caché optimizados para mejorar rendimiento
+    def serve_media_with_cache(request, path, document_root=None):
+        """Servir archivos media con headers de caché para mejorar rendimiento"""
+        response = serve(request, path, document_root=document_root)
+        # Agregar headers de caché para imágenes (1 año para archivos estáticos)
+        if path.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg')):
+            response['Cache-Control'] = 'public, max-age=31536000, immutable'
+            response['Expires'] = 'Thu, 31 Dec 2025 23:59:59 GMT'
+        return response
+    
+    # Reemplazar el static() por defecto con nuestra versión con caché
+    urlpatterns += [
+        path(f'{settings.MEDIA_URL.lstrip("/")}<path:path>', 
+             lambda request, path: serve_media_with_cache(request, path, document_root=settings.MEDIA_ROOT)),
+    ]
     # Serve static files in development
     if settings.STATICFILES_DIRS:
         from django.contrib.staticfiles.urls import staticfiles_urlpatterns

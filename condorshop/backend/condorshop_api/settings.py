@@ -3,11 +3,13 @@ Django settings for condorshop_api project.
 """
 import os
 import mimetypes
+import warnings
 from pathlib import Path
 import environ
 
-import pymysql
-pymysql.install_as_MySQLdb()
+# Suprimir RuntimeWarning sobre acceso a BD durante inicialización de apps
+# (común cuando se importan signals en AppConfig.ready())
+warnings.filterwarnings('ignore', category=RuntimeWarning, module='django.db.backends.utils')
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -90,17 +92,19 @@ WSGI_APPLICATION = 'condorshop_api.wsgi.application'
 # Database
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
+        'ENGINE': 'django.db.backends.postgresql',
         'NAME': env('DB_NAME'),
         'USER': env('DB_USER'),
         'PASSWORD': env('DB_PASSWORD'),
         'HOST': env('DB_HOST', default='localhost'),
-        'PORT': env('DB_PORT', default='3306'),
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-        },
+        'PORT': env('DB_PORT', default='5432'),
         'ATOMIC_REQUESTS': True,
+        # Optimizaciones para base de datos remota (Supabase)
+        'CONN_MAX_AGE': 600,  # Reutilizar conexiones por 10 minutos (reduce latencia)
+        'OPTIONS': {
+            'connect_timeout': 10,  # Timeout de conexión en segundos
+            'options': '-c statement_timeout=30000',  # Timeout de queries: 30 segundos
+        },
     }
 }
 
@@ -310,4 +314,19 @@ LOGGING = {
 logs_dir = os.path.join(BASE_DIR, 'logs')
 if not os.path.exists(logs_dir):
     os.makedirs(logs_dir)
+
+# Cache Configuration
+# Usar caché en memoria para desarrollo (simple y rápido)
+# En producción, usar Redis o Memcached
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'condorshop-cache',
+        'OPTIONS': {
+            'MAX_ENTRIES': 1000,
+            'CULL_FREQUENCY': 3,  # Eliminar 1/3 de entradas cuando se alcanza MAX_ENTRIES
+        },
+        'TIMEOUT': 300,  # 5 minutos por defecto
+    }
+}
 

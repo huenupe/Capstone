@@ -6,6 +6,7 @@ import QuantityStepper from '../components/forms/QuantityStepper'
 import Button from '../components/common/Button'
 import Spinner from '../components/common/Spinner'
 import PriceTag from '../components/products/PriceTag'
+import OptimizedImage from '../components/common/OptimizedImage'
 import { cartService } from '../services/cart'
 import { useCartStore } from '../store/cartSlice'
 import { useAuthStore } from '../store/authSlice'
@@ -139,13 +140,16 @@ const Cart = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Items */}
           <div className="lg:col-span-2 space-y-4">
-            {items.map((item) => (
+            {items.map((item, index) => (
               <div key={item.id} className="bg-white rounded-lg shadow-md p-6">
                 <div className="flex gap-4">
-                  <img
+                  <OptimizedImage
                     src={getProductImage(item.product)}
-                    alt={item.product?.name}
-                    className="w-24 h-24 object-cover rounded"
+                    alt={item.product?.name || 'Producto'}
+                    className="w-24 h-24 object-cover rounded flex-shrink-0"
+                    width={96}
+                    height={96}
+                    priority={index === 0} // Primera imagen con prioridad alta (LCP)
                     onError={(e) => {
                       e.target.src = '/placeholder-product.jpg'
                     }}
