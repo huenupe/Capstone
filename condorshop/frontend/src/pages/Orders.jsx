@@ -3,12 +3,15 @@ import { Link } from 'react-router-dom'
 import { formatPrice } from '../utils/formatPrice'
 import { getProductImage } from '../utils/getProductImage'
 import Spinner from '../components/common/Spinner'
+import Button from '../components/common/Button'
 import { ordersService } from '../services/orders'
+import paymentsService from '../services/paymentsService'
 import { useToast } from '../components/common/Toast'
 
 const Orders = () => {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
+  const [processingOrderId, setProcessingOrderId] = useState(null)
   const toast = useToast()
   const toastRef = useRef(toast)
 
@@ -59,6 +62,59 @@ const Orders = () => {
         {status?.name || status?.code || 'Desconocido'}
       </span>
     )
+  }
+
+  const handleRetryPayment = async (orderId) => {
+    setProcessingOrderId(orderId)
+    try {
+      const webpayEnabled = import.meta.env.VITE_WEBPAY_ENABLED === 'true'
+      
+      if (!webpayEnabled) {
+        showToast('error', 'Webpay no está habilitado')
+        setProcessingOrderId(null)
+        return
+      }
+
+      const paymentResponse = await paymentsService.initiateWebpayPayment(orderId)
+      
+      if (paymentResponse.success && paymentResponse.token && paymentResponse.url) {
+        // Guardar order_id en sessionStorage
+        sessionStorage.setItem('pending_order_id', orderId)
+        sessionStorage.setItem('pending_order_amount', paymentResponse.amount || 0)
+        
+        showToast('success', 'Redirigiendo a Webpay...')
+        
+        // Pequeño delay para que el usuario vea el mensaje
+        setTimeout(() => {
+          paymentsService.redirectToWebpay(paymentResponse.token, paymentResponse.url)
+        }, 1000)
+      } else {
+        throw new Error('Respuesta inválida de Webpay')
+      }
+    } catch (error) {
+      console.error('Error al reintentar pago:', error)
+      showToast('error', error.response?.data?.error || 'Error al iniciar el pago')
+      setProcessingOrderId(null)
+    }
+  }
+
+  const handleCancelOrder = async (orderId) => {
+    if (!window.confirm('¿Estás seguro de que deseas cancelar este pedido?')) {
+      return
+    }
+
+    setProcessingOrderId(orderId)
+    try {
+      await ordersService.cancelOrder(orderId)
+      showToast('success', 'Pedido cancelado exitosamente')
+      // Recargar lista de pedidos
+      loadOrders()
+    } catch (error) {
+      console.error('Error al cancelar pedido:', error)
+      showToast('error', error.response?.data?.error || 'Error al cancelar el pedido')
+    } finally {
+      setProcessingOrderId(null)
+    }
   }
 
   if (loading) {
@@ -162,6 +218,34 @@ const Orders = () => {
                       </p>
                     </div>
                   </div>
+
+                  {/* Botones de acción para pedidos PENDING */}
+                  {order.status?.code === 'PENDING' && (
+                    <div className="flex gap-3 mt-4 pt-4 border-t">
+                      <Button
+                        onClick={() => handleRetryPayment(order.id)}
+                        disabled={processingOrderId === order.id}
+                        className="flex-1"
+                      >
+                        {processingOrderId === order.id ? (
+                          <>
+                            <Spinner size="sm" className="mr-2" />
+                            Procesando...
+                          </>
+                        ) : (
+                          'Pagar Ahora'
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => handleCancelOrder(order.id)}
+                        disabled={processingOrderId === order.id}
+                        className="flex-1"
+                      >
+                        Cancelar Pedido
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

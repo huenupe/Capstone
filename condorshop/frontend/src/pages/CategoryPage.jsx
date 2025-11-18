@@ -225,20 +225,30 @@ const CategoryPage = () => {
       return
     }
 
+    // Mostrar toast inmediatamente (optimistic UI)
+    toast.success('Producto agregado al carrito')
+
     try {
       await cartService.addToCart({
         product_id: product.id,
         quantity,
       })
 
-      // Refresh cart
-      const cartData = await cartService.getCart()
-      setCart(cartData)
-
-      toast.success('Producto agregado al carrito')
+      // Refresh cart en background (sin bloquear UI)
+      cartService.getCart().then(cartData => {
+        setCart(cartData)
+      }).catch(err => {
+        console.error('Error refreshing cart:', err)
+      })
     } catch (error) {
+      // Si falla, mostrar error y recargar carrito para sincronizar
       toast.error(error.response?.data?.error || 'Error al agregar al carrito')
       console.error('Error adding to cart:', error)
+      cartService.getCart().then(cartData => {
+        setCart(cartData)
+      }).catch(err => {
+        console.error('Error refreshing cart after error:', err)
+      })
     }
   }
 

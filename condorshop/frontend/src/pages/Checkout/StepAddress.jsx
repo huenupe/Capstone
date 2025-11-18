@@ -156,7 +156,27 @@ const StepAddress = () => {
     setValue('postal_code', address.postal_code || '')
     setValue('number', address.number || '')
     setValue('apartment', address.apartment || '')
-  }, [setSelectedAddressId, setValue])
+    
+    // ✅ CORRECCIÓN: Guardar dirección seleccionada inmediatamente en storage
+    const addressData = {
+      street: address.street || '',
+      city: address.city || '',
+      region: regionValue || '',
+      postal_code: address.postal_code || '',
+      number: address.number || '',
+      apartment: address.apartment || '',
+    }
+    
+    const existingData = storage.get(CHECKOUT_STORAGE_KEY, !isAuthenticated) || {}
+    storage.set(CHECKOUT_STORAGE_KEY, {
+      ...existingData,
+      address: {
+        ...addressData,
+        selected_address_id: address.id, // Guardar ID de dirección seleccionada
+      },
+      deliveryMethod: selectedDeliveryMethod,
+    }, !isAuthenticated)
+  }, [setSelectedAddressId, setValue, isAuthenticated, selectedDeliveryMethod])
 
   const handleNewAddress = useCallback(() => {
     setSelectedAddressId(null)
@@ -192,6 +212,29 @@ const StepAddress = () => {
       loadSavedAddresses()
     }
   }, [isAuthenticated, loadSavedAddresses])
+  
+  // ✅ CORRECCIÓN: Restaurar dirección seleccionada desde storage al cargar
+  useEffect(() => {
+    if (isAuthenticated && savedAddresses.length > 0 && !selectedAddressId) {
+      const storedData = storage.get(CHECKOUT_STORAGE_KEY, false)
+      const storedAddressId = storedData?.address?.selected_address_id
+      
+      if (storedAddressId && storedAddressId !== selectedAddressId) {
+        const storedAddress = savedAddresses.find(addr => addr.id === storedAddressId)
+        if (storedAddress) {
+          setSelectedAddressId(storedAddressId)
+          // Solo actualizar valores del formulario, no guardar en storage (ya está guardado)
+          const regionValue = matchRegionValue(storedAddress.region)
+          setValue('street', storedAddress.street || '')
+          setValue('city', storedAddress.city || '')
+          setValue('region', regionValue || '')
+          setValue('postal_code', storedAddress.postal_code || '')
+          setValue('number', storedAddress.number || '')
+          setValue('apartment', storedAddress.apartment || '')
+        }
+      }
+    }
+  }, [isAuthenticated, savedAddresses, selectedAddressId, setValue])
 
   // Verificar que los pasos anteriores estén completos
   useEffect(() => {
@@ -243,9 +286,34 @@ const StepAddress = () => {
   
   // Función para manejar el envío cuando hay dirección seleccionada
   const handleContinueWithSelectedAddress = () => {
+    // ✅ CORRECCIÓN: Validar que haya dirección antes de continuar
     if (isAuthenticated && selectedAddressId) {
+      // Asegurar que la dirección esté guardada en storage
+      const selectedAddress = savedAddresses.find(addr => addr.id === selectedAddressId)
+      if (selectedAddress) {
+        const regionValue = matchRegionValue(selectedAddress.region)
+        const addressData = {
+          street: selectedAddress.street || '',
+          city: selectedAddress.city || '',
+          region: regionValue || '',
+          postal_code: selectedAddress.postal_code || '',
+          number: selectedAddress.number || '',
+          apartment: selectedAddress.apartment || '',
+        }
+        
+        const existingData = storage.get(CHECKOUT_STORAGE_KEY, !isAuthenticated) || {}
+        storage.set(CHECKOUT_STORAGE_KEY, {
+          ...existingData,
+          address: {
+            ...addressData,
+            selected_address_id: selectedAddressId,
+          },
+          deliveryMethod: selectedDeliveryMethod,
+        }, !isAuthenticated)
+      }
       onSubmit({})
     } else {
+      // Validar formulario antes de continuar
       handleSubmit(onSubmit)()
     }
   }

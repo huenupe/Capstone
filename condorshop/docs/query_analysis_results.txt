@@ -1,0 +1,25 @@
+﻿Analizando ├¡ndices con EXPLAIN...
+
+Listado productos activos por fecha de creaci├│n
+SELECT `products`.`id`, `products`.`category_id`, `products`.`name`, `products`.`slug`, `products`.`description`, `products`.`price`, `products`.`discount_price`, `products`.`discount_amount`, `products`.`discount_percent`, `products`.`stock_qty`, `products`.`brand`, `products`.`sku`, `products`.`active`, `products`.`created_at`, `products`.`updated_at` FROM `products` WHERE `products`.`active` = True ORDER BY `products`.`created_at` DESC
+Formato EXPLAIN: TEXT
+No se pudieron obtener detalles del plan estructurado.
+-> Index lookup on products using idx_product_active_created (active=1)  (cost=1 rows=5)
+
+B├║squeda por prefijo (name__istartswith='a')
+SELECT `products`.`id`, `products`.`category_id`, `products`.`name`, `products`.`slug`, `products`.`description`, `products`.`price`, `products`.`discount_price`, `products`.`discount_amount`, `products`.`discount_percent`, `products`.`stock_qty`, `products`.`brand`, `products`.`sku`, `products`.`active`, `products`.`created_at`, `products`.`updated_at` FROM `products` WHERE `products`.`name` LIKE a%
+Formato EXPLAIN: TEXT
+No se pudieron obtener detalles del plan estructurado.
+-> Index range scan on products using idx_product_name over ('a																																																																																																																																																																																																							' <= name <= 'a´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐´┐┐'), with index condition: (products.`name` like 'a%')  (cost=0.71 rows=1)
+
+├ìtems de carrito por cart/product
+SELECT `cart_items`.`id`, `cart_items`.`cart_id`, `cart_items`.`product_id`, `cart_items`.`quantity`, `cart_items`.`unit_price`, `cart_items`.`total_price`, `cart_items`.`created_at`, `cart_items`.`updated_at` FROM `cart_items` WHERE (`cart_items`.`cart_id` = 9 AND `cart_items`.`product_id` IN (5))
+Formato EXPLAIN: TEXT
+No se pudieron obtener detalles del plan estructurado.
+-> Rows fetched before execution  (cost=0..0 rows=1)
+
+├ôrdenes por correo demo@example.com
+SELECT `orders`.`id`, `orders`.`user_id`, `orders`.`status_id`, `orders`.`customer_name`, `orders`.`customer_email`, `orders`.`customer_phone`, `orders`.`shipping_street`, `orders`.`shipping_city`, `orders`.`shipping_region`, `orders`.`shipping_postal_code`, `orders`.`total_amount`, `orders`.`shipping_cost`, `orders`.`currency`, `orders`.`created_at`, `orders`.`updated_at` FROM `orders` WHERE `orders`.`customer_email` = demo@example.com
+Formato EXPLAIN: TEXT
+No se pudieron obtener detalles del plan estructurado.
+-> Index lookup on orders using idx_order_customer_email (customer_email='demo@example.com')  (cost=0.35 rows=1)

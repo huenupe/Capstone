@@ -92,6 +92,8 @@ urlpatterns = [
     path('api/cart/', include('apps.cart.urls')),
     path('api/checkout/', include('apps.orders.urls')),
     path('api/orders/', include('apps.orders.urls')),
+    # APIs de pagos (callbacks de Webpay)
+    path('api/payments/', include('apps.orders.payment_urls')),
 ]
 
 if settings.DEBUG:

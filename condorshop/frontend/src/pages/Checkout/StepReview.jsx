@@ -5,6 +5,7 @@ import { getProductImage } from '../../utils/getProductImage'
 import Button from '../../components/common/Button'
 import Spinner from '../../components/common/Spinner'
 import { ordersService } from '../../services/orders'
+import paymentsService from '../../services/paymentsService'
 import { useCartStore } from '../../store/cartSlice'
 import { useAuthStore } from '../../store/authSlice'
 import { useToast } from '../../components/common/Toast'
@@ -16,11 +17,12 @@ const CHECKOUT_STORAGE_KEY = 'checkout_data'
 const StepReview = () => {
   const navigate = useNavigate()
   const { items, subtotal, shipping, total, clearCart } = useCartStore()
-  const [loading, setLoading] = useState(false)
+  const [isCreatingOrder, setIsCreatingOrder] = useState(false)
   const [orderData, setOrderData] = useState(null)
+  const [error, setError] = useState(null)
   const toast = useToast()
 
-  const { isAuthenticated } = useAuthStore()
+  const { isAuthenticated, user } = useAuthStore()
 
   useEffect(() => {
     const storedData = storage.get(CHECKOUT_STORAGE_KEY, !isAuthenticated)
@@ -35,23 +37,43 @@ const StepReview = () => {
   }, [navigate, isAuthenticated])
 
   const checkoutData = storage.get(CHECKOUT_STORAGE_KEY, !isAuthenticated) || {}
+  
+  // ✅ CORRECCIÓN: Obtener datos del cliente (usuario autenticado o datos del storage)
+  const customerData = isAuthenticated && user
+    ? {
+        email: user.email || '',
+        first_name: user.first_name || '',
+        last_name: user.last_name || '',
+        phone: user.phone || '',
+      }
+    : checkoutData.customer || {}
 
   const handleCreateOrder = async () => {
-    if (!checkoutData.customer || !checkoutData.address) {
+    // ✅ CORRECCIÓN: Validar con customerData en lugar de checkoutData.customer
+    if (!customerData.email || !customerData.first_name || !checkoutData.address) {
       toast.error('Por favor completa todos los pasos')
-      navigate('/checkout/customer')
+      if (!isAuthenticated) {
+        navigate('/checkout/customer')
+      } else {
+        navigate('/checkout/address')
+      }
       return
     }
 
-    setLoading(true)
+    setIsCreatingOrder(true)
+    setError(null)
+
     try {
+      // 1. Crear la orden (estado PENDING)
+      console.log('Creando orden...', { customerData, address: checkoutData.address })
+      
       // Mapear región del frontend al formato del backend (nombre completo)
       const regionLabel = getRegionLabel(checkoutData.address.region)
 
       const orderPayload = {
-        customer_name: `${checkoutData.customer.first_name} ${checkoutData.customer.last_name}`,
-        customer_email: checkoutData.customer.email,
-        customer_phone: checkoutData.customer.phone || '',
+        customer_name: `${customerData.first_name} ${customerData.last_name}`,
+        customer_email: customerData.email,
+        customer_phone: customerData.phone || '',
         shipping_street: checkoutData.address.street,
         shipping_city: checkoutData.address.city,
         shipping_region: regionLabel,
@@ -62,22 +84,75 @@ const StepReview = () => {
       }
 
       const order = await ordersService.createOrder(orderPayload)
+      console.log('Orden creada:', order)
+      
       setOrderData(order)
+
+      // 2. Verificar si Webpay está habilitado
+      const webpayEnabled = import.meta.env.VITE_WEBPAY_ENABLED === 'true'
       
-      // Clear cart and checkout data
-      clearCart()
-      storage.remove(CHECKOUT_STORAGE_KEY, !isAuthenticated)
+      if (!webpayEnabled) {
+        // Modo legacy: mostrar confirmación sin pago
+        console.warn('Webpay deshabilitado. Mostrando confirmación sin pago.')
+        clearCart()
+        storage.remove(CHECKOUT_STORAGE_KEY, !isAuthenticated)
+        toast.success('¡Pedido creado exitosamente!')
+        setIsCreatingOrder(false)
+        return
+      }
+
+      // 3. Iniciar pago con Webpay
+      console.log('Iniciando pago Webpay para orden:', order.id)
       
-      toast.success('¡Pedido creado exitosamente!')
-    } catch (error) {
-      toast.error(error.response?.data?.error || 'Error al crear el pedido')
-      console.error('Error creating order:', error)
-    } finally {
-      setLoading(false)
+      try {
+        const paymentResponse = await paymentsService.initiateWebpayPayment(order.id)
+        console.log('Respuesta de Webpay:', paymentResponse)
+
+        // 4. Redirigir a Webpay
+        if (paymentResponse.success && paymentResponse.token && paymentResponse.url) {
+          // Guardar order_id en sessionStorage para recuperarlo al volver
+          sessionStorage.setItem('pending_order_id', order.id)
+          sessionStorage.setItem('pending_order_amount', order.total_amount)
+          
+          // Clear cart and checkout data antes de redirigir
+          clearCart()
+          storage.remove(CHECKOUT_STORAGE_KEY, !isAuthenticated)
+          
+          console.log('Redirigiendo a Webpay...')
+          
+          // Pequeño delay para que el usuario vea el mensaje
+          setTimeout(() => {
+            paymentsService.redirectToWebpay(paymentResponse.token, paymentResponse.url)
+          }, 1000)
+          
+        } else {
+          throw new Error('Respuesta inválida de Webpay')
+        }
+        
+      } catch (paymentError) {
+        console.error('Error al iniciar pago:', paymentError)
+        setError(
+          'No se pudo iniciar el pago. Por favor, intenta nuevamente o contacta con soporte.'
+        )
+        setIsCreatingOrder(false)
+        toast.error(paymentError.response?.data?.error || 'Error al iniciar el pago')
+      }
+
+    } catch (orderError) {
+      console.error('Error al crear orden:', orderError)
+      setError(
+        orderError.response?.data?.error || 
+        'Error al crear la orden. Por favor, intenta nuevamente.'
+      )
+      setIsCreatingOrder(false)
+      toast.error(orderError.response?.data?.error || 'Error al crear el pedido')
     }
   }
 
-  if (orderData) {
+  // Si Webpay está habilitado, no mostrar confirmación aquí (redirige a Webpay)
+  const webpayEnabled = import.meta.env.VITE_WEBPAY_ENABLED === 'true'
+  
+  if (orderData && !webpayEnabled) {
     return (
       <div className="min-h-screen bg-gray-50 py-8">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -145,8 +220,38 @@ const StepReview = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <>
+      {/* Modal de carga cuando está creando orden o redirigiendo */}
+      {isCreatingOrder && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-8 rounded-lg shadow-xl max-w-md">
+            <div className="flex flex-col items-center">
+              <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mb-4"></div>
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">
+                {orderData ? 'Redirigiendo a Webpay...' : 'Creando tu orden...'}
+              </h3>
+              <p className="text-gray-600 text-center">
+                {orderData 
+                  ? 'Serás redirigido al sitio de pago seguro de Transbank.'
+                  : 'Por favor espera mientras procesamos tu solicitud.'
+                }
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mensaje de error */}
+      {error && (
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 mb-4">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-red-800">{error}</p>
+          </div>
+        </div>
+      )}
+
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="mb-8">
           <div className="flex items-center justify-center mb-4">
             <div className="flex items-center">
@@ -175,14 +280,14 @@ const StepReview = () => {
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Datos del Cliente</h2>
               <div className="space-y-2 text-sm">
                 <p>
-                  <span className="font-medium">Email:</span> {checkoutData.customer?.email}
+                  <span className="font-medium">Email:</span> {customerData?.email || 'No especificado'}
                 </p>
                 <p>
                   <span className="font-medium">Nombre:</span>{' '}
-                  {checkoutData.customer?.first_name} {checkoutData.customer?.last_name}
+                  {customerData?.first_name || ''} {customerData?.last_name || ''}
                 </p>
                 <p>
-                  <span className="font-medium">Teléfono:</span> {checkoutData.customer?.phone}
+                  <span className="font-medium">Teléfono:</span> {customerData?.phone || 'No especificado'}
                 </p>
               </div>
             </div>
@@ -262,9 +367,9 @@ const StepReview = () => {
                 onClick={handleCreateOrder}
                 fullWidth
                 size="lg"
-                disabled={loading}
+                disabled={isCreatingOrder}
               >
-                {loading ? <Spinner size="sm" /> : 'Crear Pedido'}
+                {isCreatingOrder ? <Spinner size="sm" /> : 'Crear Pedido'}
               </Button>
               <Button
                 variant="outline"
@@ -276,8 +381,9 @@ const StepReview = () => {
             </div>
           </div>
         </div>
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 

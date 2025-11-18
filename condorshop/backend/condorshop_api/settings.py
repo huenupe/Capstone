@@ -255,6 +255,27 @@ if EMAIL_BACKEND == 'anymail.backends.mailgun.EmailBackend':
         "MAILGUN_SENDER_DOMAIN": env('ANYMAIL_MAILGUN_SENDER_DOMAIN', default='mg.example.com'),
     }
 
+# ============================================
+# WEBPAY PLUS CONFIGURATION
+# ============================================
+WEBPAY_CONFIG = {
+    'ENVIRONMENT': env('WEBPAY_ENVIRONMENT', default='integration'),
+    'COMMERCE_CODE': env('WEBPAY_COMMERCE_CODE', default='597055555532'),
+    'API_KEY': env('WEBPAY_API_KEY', default='579B532A7440BB0C9079DED94D31EA1615BACEB56610332264630D42D0A36B1C'),
+    'RETURN_URL': env('WEBPAY_RETURN_URL', default='http://localhost:8000/api/payments/return/'),
+    'FINAL_URL': env('WEBPAY_FINAL_URL', default='http://localhost:5173/payment/result'),
+}
+
+# Validar configuración en startup
+if WEBPAY_CONFIG['ENVIRONMENT'] == 'production':
+    from django.core.exceptions import ImproperlyConfigured
+    required_webpay_vars = ['COMMERCE_CODE', 'API_KEY', 'RETURN_URL', 'FINAL_URL']
+    for var in required_webpay_vars:
+        if WEBPAY_CONFIG[var].startswith('http://localhost'):
+            raise ImproperlyConfigured(
+                f"Webpay en producción no puede usar localhost. Configura {var}"
+            )
+
 # Logging Configuration
 LOGGING = {
     'version': 1,

@@ -14,6 +14,7 @@ import StepCustomer from '../pages/Checkout/StepCustomer'
 import StepAddress from '../pages/Checkout/StepAddress'
 import StepPayment from '../pages/Checkout/StepPayment'
 import StepReview from '../pages/Checkout/StepReview'
+import PaymentResultPage from '../pages/PaymentResultPage'
 
 // Auth pages
 import ForgotPassword from '../pages/Auth/ForgotPassword'
@@ -41,6 +42,9 @@ const AppRoutes = () => {
       <Route path="/checkout/address" element={<StepAddress />} />
       <Route path="/checkout/payment" element={<StepPayment />} />
       <Route path="/checkout/review" element={<StepReview />} />
+      
+      {/* Payment result page (public, accessed after Webpay redirect) */}
+      <Route path="/payment/result" element={<PaymentResultPage />} />
 
       {/* Protected routes (client) */}
       <Route

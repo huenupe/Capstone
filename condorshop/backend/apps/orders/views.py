@@ -1,14 +1,21 @@
+import logging
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticatedOrReadOnly, IsAuthenticated
 from rest_framework.response import Response
 from django.db import transaction
+from django.shortcuts import redirect
+from django.views.decorators.csrf import csrf_exempt
+from django.core.exceptions import ValidationError
 from django_ratelimit.decorators import ratelimit
-from .models import Order, OrderItem, OrderStatus
+from django.conf import settings
+from .models import Order, OrderItem, OrderStatus, PaymentTransaction
 from .serializers import OrderSerializer, CreateOrderSerializer
-from .services import evaluate_shipping, send_order_confirmation_email
+from .services import evaluate_shipping, send_order_confirmation_email, webpay_service
 from apps.cart.models import Cart
 from apps.products.models import Product
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_shipping_cost(subtotal, region=None, cart_items=None):
@@ -126,15 +133,9 @@ def create_order(request):
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    # Obtener carrito
+    # ✅ CORRECCIÓN: Usar get_or_create_cart para manejar múltiples carritos
     if request.user.is_authenticated:
-        try:
-            cart = Cart.objects.get(user=request.user, is_active=True)
-        except Cart.DoesNotExist:
-            return Response(
-                {'error': 'Carrito no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        cart, _ = Cart.get_or_create_cart(user=request.user)
     else:
         session_token = request.headers.get('X-Session-Token')
         if not session_token:
@@ -142,13 +143,7 @@ def create_order(request):
                 {'error': 'Token de sesión requerido'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        try:
-            cart = Cart.objects.get(session_token=session_token, is_active=True)
-        except Cart.DoesNotExist:
-            return Response(
-                {'error': 'Carrito no encontrado'},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        cart, _ = Cart.get_or_create_cart(session_token=session_token)
 
     cart_items_qs = cart.items.select_related('product').all()
     if not cart_items_qs.exists():
@@ -416,4 +411,333 @@ def get_order_detail(request, order_id):
     
     serializer = OrderSerializer(order)
     return Response(serializer.data)
+
+
+# ============================================
+# WEBPAY PAYMENT VIEWS
+# ============================================
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def initiate_webpay_payment(request, order_id):
+    """
+    Inicia el proceso de pago con Webpay Plus
+
+    POST /api/checkout/{order_id}/pay/ o /api/orders/{order_id}/pay/
+    """
+    # webpay_service debe estar disponible - si no lo está, el error se propagará
+    if webpay_service is None:
+        logger.error("webpay_service es None - esto no debería pasar si transbank-sdk está instalado")
+        return Response({
+            'error': 'Webpay no está disponible. Contacta al administrador.'
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    try:
+        # Buscar la orden
+        order = Order.objects.select_related('status', 'user').get(id=order_id)
+
+        # Validar que la orden esté en estado PENDING
+        if order.status.code != 'PENDING':
+            return Response({
+                'error': f'La orden no está en estado pendiente (actual: {order.status.code})'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validar propiedad de la orden (si hay usuario autenticado)
+        if request.user.is_authenticated:
+            if order.user != request.user:
+                return Response({
+                    'error': 'No tienes permiso para pagar esta orden'
+                }, status=status.HTTP_403_FORBIDDEN)
+        else:
+            # Para invitados, validar por session_token
+            session_token = request.headers.get('X-Session-Token')
+            if not session_token:
+                return Response({
+                    'error': 'Se requiere token de sesión para invitados'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Crear transacción de pago
+        success, token_or_error, data = webpay_service.create_transaction(order)
+
+        if not success:
+            logger.error(f"[WEBPAY] Error al crear transacción Webpay: {token_or_error}")
+            logger.error(f"[WEBPAY] Orden ID: {order.id}, Monto: {order.total_amount}")
+            # Retornar el error específico sin ocultarlo
+            return Response({
+                'error': token_or_error,
+                'order_id': order.id,
+                'amount': str(order.total_amount)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Retornar URL y token de Webpay
+        return Response({
+            'success': True,
+            'token': data['token'],
+            'url': data['url'],
+            'order_id': order.id,
+            'amount': order.total_amount,
+            'message': 'Transacción creada. Redirigir a Webpay.'
+        }, status=status.HTTP_200_OK)
+
+    except Order.DoesNotExist:
+        return Response({
+            'error': 'Orden no encontrada'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    except Exception as e:
+        error_type = type(e).__name__
+        error_message = str(e)
+        logger.error(f"[WEBPAY] Error inesperado en initiate_webpay_payment:")
+        logger.error(f"[WEBPAY] Tipo: {error_type}")
+        logger.error(f"[WEBPAY] Mensaje: {error_message}")
+        logger.error(f"[WEBPAY] Traceback completo:", exc_info=True)
+        # NO ocultar el error - retornar detalles completos
+        return Response({
+            'error': f'Error interno del servidor: {error_message}',
+            'error_type': error_type
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+@csrf_exempt  # Webpay puede retornar vía POST sin CSRF
+def webpay_return(request):
+    """
+    Callback de retorno de Webpay Plus
+
+    GET/POST /api/payments/return/?token_ws=XXX
+
+    Webpay redirige aquí después de que el usuario paga
+    """
+    if webpay_service is None:
+        final_url = settings.WEBPAY_CONFIG['FINAL_URL']
+        return redirect(f"{final_url}?status=error&message=service_unavailable")
+
+    try:
+        # Obtener token (puede venir por GET o POST)
+        token = request.GET.get('token_ws') or request.POST.get('token_ws')
+
+        if not token:
+            logger.error("Retorno de Webpay sin token")
+            # Redirigir al frontend con error
+            final_url = settings.WEBPAY_CONFIG['FINAL_URL']
+            return redirect(f"{final_url}?error=missing_token")
+
+        logger.info(f"Retorno de Webpay con token: {token[:20]}...")
+
+        # Confirmar la transacción
+        success, message, data = webpay_service.confirm_transaction(token)
+
+        if success:
+            # PAGO EXITOSO - Redirigir al frontend con éxito
+            order_id = data['order_id']
+            final_url = settings.WEBPAY_CONFIG['FINAL_URL']
+            redirect_url = f"{final_url}?status=success&order_id={order_id}"
+            logger.info(f"Redirigiendo a: {redirect_url}")
+            return redirect(redirect_url)
+        else:
+            # PAGO FALLIDO - Redirigir al frontend con error
+            final_url = settings.WEBPAY_CONFIG['FINAL_URL']
+            redirect_url = f"{final_url}?status=failed&message={message}"
+            logger.warning(f"Redirigiendo a: {redirect_url}")
+            return redirect(redirect_url)
+
+    except Exception as e:
+        logger.error(f"Error en webpay_return: {str(e)}", exc_info=True)
+        final_url = settings.WEBPAY_CONFIG['FINAL_URL']
+        return redirect(f"{final_url}?status=error&message=internal_error")
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def payment_status(request, order_id):
+    """
+    Consulta el estado de pago de una orden
+
+    GET /api/payments/status/{order_id}/
+    Retorna información completa del pago según requerimientos de Transbank
+    """
+    try:
+        order = Order.objects.select_related('status', 'shipping_snapshot').prefetch_related(
+            'items__product', 'items__price_snapshot'
+        ).get(id=order_id)
+
+        # ✅ CORRECCIÓN: Usar SQL raw para evitar deserializar gateway_response corrupto
+        # Leer solo los campos necesarios sin gateway_response
+        from django.db import connection
+        
+        transaction_data = None
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT 
+                    id, status, amount, currency,
+                    webpay_token, webpay_buy_order, webpay_authorization_code,
+                    webpay_transaction_date, card_last_four, card_brand,
+                    gateway_response
+                FROM payment_transactions 
+                WHERE order_id = %s 
+                ORDER BY created_at DESC 
+                LIMIT 1
+            """, [order.id])
+            row = cursor.fetchone()
+            
+            if row:
+                transaction_id = row[0]
+                transaction_status = row[1]
+                transaction_amount = row[2]
+                transaction_currency = row[3]
+                webpay_token = row[4]
+                webpay_buy_order = row[5]
+                webpay_authorization_code = row[6]
+                webpay_transaction_date = row[7]
+                card_last_four = row[8]
+                card_brand = row[9]
+                gateway_response_raw = row[10]
+                
+                # Intentar parsear gateway_response de forma segura
+                installments_number = None
+                if gateway_response_raw:
+                    try:
+                        import json
+                        # Si es string, parsearlo
+                        if isinstance(gateway_response_raw, str):
+                            gateway_response = json.loads(gateway_response_raw)
+                        # Si ya es dict (dato corrupto), usarlo directamente
+                        elif isinstance(gateway_response_raw, dict):
+                            gateway_response = gateway_response_raw
+                        else:
+                            gateway_response = None
+                        
+                        if gateway_response and isinstance(gateway_response, dict):
+                            commit_response = gateway_response.get('commit_response', {})
+                            if isinstance(commit_response, dict):
+                                installments_number = commit_response.get('installments_number')
+                    except (json.JSONDecodeError, TypeError, AttributeError):
+                        # Si falla, ignorar gateway_response
+                        gateway_response = None
+                
+                transaction_data = {
+                    'id': transaction_id,
+                    'status': transaction_status,
+                    'amount': transaction_amount,
+                    'currency': transaction_currency,
+                    'webpay_token': webpay_token,
+                    'webpay_buy_order': webpay_buy_order,
+                    'webpay_authorization_code': webpay_authorization_code,
+                    'webpay_transaction_date': webpay_transaction_date,
+                    'card_last_four': card_last_four,
+                    'card_brand': card_brand,
+                    'installments_number': installments_number,
+                }
+
+        # Obtener información de productos para descripción
+        items_data = []
+        for item in order.items.all():
+            product_name = item.price_snapshot.product_name if item.price_snapshot else (
+                item.product.name if item.product else 'Producto eliminado'
+            )
+            items_data.append({
+                'name': product_name,
+                'quantity': item.quantity,
+                'unit_price': item.unit_price,
+                'total_price': item.total_price
+            })
+
+        # Construir respuesta base
+        response_data = {
+            'order_id': order.id,
+            'order_status': order.status.code,
+            'order_status_name': order.status.description,
+            'payment_status': transaction_data['status'] if transaction_data else None,
+            'amount': order.total_amount,
+            'currency': order.currency,
+            'has_transaction': transaction_data is not None,
+            'items': items_data,  # Descripción de bienes/servicios
+            'transaction_data': None
+        }
+
+        # Si hay transacción aprobada, agregar datos completos
+        if transaction_data and transaction_data['status'] == 'approved':
+            response_data['transaction_data'] = {
+                'authorization_code': transaction_data['webpay_authorization_code'],
+                'card_last_four': transaction_data['card_last_four'],
+                'transaction_date': transaction_data['webpay_transaction_date'],
+                'card_brand': transaction_data['card_brand'],  # Tipo de pago (Crédito/Débito)
+                'installments_number': transaction_data.get('installments_number'),  # Número de cuotas
+            }
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+    except Order.DoesNotExist:
+        return Response({
+            'error': 'Orden no encontrada'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@transaction.atomic
+def cancel_order(request, order_id):
+    """
+    Cancela un pedido en estado PENDING
+    
+    POST /api/orders/{order_id}/cancel/
+    
+    Solo el dueño del pedido puede cancelarlo.
+    Solo se pueden cancelar pedidos en estado PENDING.
+    """
+    try:
+        order = Order.objects.select_related('status', 'user').get(id=order_id)
+        
+        # Validar propiedad
+        if order.user != request.user:
+            return Response({
+                'error': 'No tienes permiso para cancelar este pedido'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Validar que esté en estado PENDING
+        if order.status.code != 'PENDING':
+            return Response({
+                'error': f'Solo se pueden cancelar pedidos pendientes (estado actual: {order.status.code})'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Cambiar estado a CANCELLED
+        try:
+            cancelled_status = OrderStatus.objects.get(code='CANCELLED')
+        except OrderStatus.DoesNotExist:
+            return Response({
+                'error': 'Estado CANCELLED no existe en el sistema'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        # Liberar stock reservado
+        for order_item in order.items.all():
+            product = order_item.product
+            product.release_stock(
+                quantity=order_item.quantity,
+                reason='Order cancelled',
+                reference_id=order.id
+            )
+            logger.info(f"Stock liberado para producto {product.id}: +{order_item.quantity}")
+        
+        # Actualizar estado
+        order.status = cancelled_status
+        order.save()
+        
+        logger.info(f"Pedido {order.id} cancelado por usuario {request.user.id}")
+        
+        return Response({
+            'message': 'Pedido cancelado exitosamente',
+            'order_id': order.id,
+            'status': order.status.code
+        }, status=status.HTTP_200_OK)
+        
+    except Order.DoesNotExist:
+        return Response({
+            'error': 'Orden no encontrada'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error al cancelar pedido {order_id}: {str(e)}", exc_info=True)
+        return Response({
+            'error': 'Error al cancelar el pedido'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

@@ -44,25 +44,49 @@ class Cart(models.Model):
 
     @classmethod
     def get_or_create_cart(cls, user=None, session_token=None):
-        """Obtiene o crea un carrito para un usuario o sesión"""
+        """
+        Obtiene o crea un carrito para un usuario o sesión.
+        
+        ✅ CORRECCIÓN: Maneja el caso de múltiples carritos activos:
+        - Si hay múltiples carritos activos, usa el más reciente
+        - Desactiva los carritos más antiguos para evitar duplicados
+        """
         if user:
-            cart, created = cls.objects.get_or_create(
-                user=user,
-                is_active=True,
-                defaults={'session_token': None}
-            )
+            # Buscar carritos activos para este usuario
+            active_carts = cls.objects.filter(user=user, is_active=True).order_by('-created_at')
+            
+            if active_carts.exists():
+                # Si hay múltiples, usar el más reciente y desactivar los otros
+                cart = active_carts.first()
+                if active_carts.count() > 1:
+                    # Desactivar carritos más antiguos (excepto el que estamos usando)
+                    active_carts.exclude(id=cart.id).update(is_active=False)
+                return cart, False
+            else:
+                # No hay carrito activo, crear uno nuevo
+                cart = cls.objects.create(user=user, is_active=True, session_token=None)
+                return cart, True
+                
         elif session_token:
-            cart, created = cls.objects.get_or_create(
-                session_token=session_token,
-                is_active=True,
-                defaults={'user': None}
-            )
+            # Buscar carrito activo para esta sesión
+            active_carts = cls.objects.filter(session_token=session_token, is_active=True).order_by('-created_at')
+            
+            if active_carts.exists():
+                # Si hay múltiples, usar el más reciente y desactivar los otros
+                cart = active_carts.first()
+                if active_carts.count() > 1:
+                    # Desactivar carritos más antiguos (excepto el que estamos usando)
+                    active_carts.exclude(id=cart.id).update(is_active=False)
+                return cart, False
+            else:
+                # No hay carrito activo, crear uno nuevo
+                cart = cls.objects.create(session_token=session_token, is_active=True, user=None)
+                return cart, True
         else:
             # Crear carrito nuevo con token de sesión
             session_token = str(uuid.uuid4())
             cart = cls.objects.create(session_token=session_token, is_active=True)
-            created = True
-        return cart, created
+            return cart, True
 
 
 class CartItem(models.Model):

@@ -65,29 +65,56 @@ const Cart = () => {
       return
     }
 
+    // Guardar cantidad anterior para revertir en caso de error
+    const previousItem = items.find(item => item.id === itemId)
+    const previousQuantity = previousItem?.quantity
+
+    // Optimistic update: actualizar UI inmediatamente
     setUpdating(itemId)
+    updateItemQuantity(itemId, quantity)
+    updateTotals()
+    
+    // Mostrar toast inmediatamente
+    showToast('success', 'Cantidad actualizada')
+
     try {
+      // Sincronizar con servidor en background
       await cartService.updateCartItem(itemId, { quantity })
-      updateItemQuantity(itemId, quantity)
-      updateTotals() // Asegurar que los totales se actualicen
-      await loadCart() // Refresh to get updated data
-      showToast('success', 'Cantidad actualizada')
     } catch (error) {
+      // Revertir cambio en caso de error
+      if (previousQuantity) {
+        updateItemQuantity(itemId, previousQuantity)
+        updateTotals()
+      }
       showToast('error', error.response?.data?.error || 'Error al actualizar cantidad')
       console.error('Error updating cart item:', error)
+      // Recargar carrito para sincronizar con servidor
+      await loadCart()
     } finally {
       setUpdating(null)
     }
   }
 
   const handleRemoveItem = async (itemId) => {
+    // Guardar item para revertir en caso de error
+    const itemToRemove = items.find(item => item.id === itemId)
+    
+    // Optimistic update: eliminar inmediatamente de la UI
     setUpdating(itemId)
+    removeItem(itemId)
+    updateTotals()
+    
+    // Mostrar toast inmediatamente
+    showToast('success', 'Producto eliminado del carrito')
+
     try {
+      // Sincronizar con servidor en background
       await cartService.removeCartItem(itemId)
-      removeItem(itemId)
-      updateTotals() // Asegurar que los totales se actualicen
-      showToast('success', 'Producto eliminado del carrito')
     } catch (error) {
+      // Revertir cambio en caso de error - recargar carrito completo
+      if (itemToRemove) {
+        await loadCart()
+      }
       showToast('error', 'Error al eliminar producto')
       console.error('Error removing cart item:', error)
     } finally {

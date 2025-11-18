@@ -30,7 +30,8 @@ const StepPayment = () => {
 
   // Flag para habilitar Webpay - manejo seguro de variable de entorno
   const webpayEnabled = import.meta.env.VITE_WEBPAY_ENABLED === 'true'
-  const canProceed = webpayEnabled && canPay
+  // El botón se habilita cuando Webpay está habilitado Y se ha seleccionado Webpay como método de pago
+  const canProceed = webpayEnabled && paymentMethod === 'webpay'
 
   const deliveryCost = deliveryMethod === 'pickup' ? 0 : shipping
 
@@ -132,7 +133,7 @@ const StepPayment = () => {
                   fullWidth
                   size="lg"
                   disabled={!canProceed}
-                  title={!canProceed ? 'Webpay no está habilitado aún' : ''}
+                  title={!canProceed ? (webpayEnabled ? 'Selecciona un método de pago' : 'Webpay no está habilitado aún') : ''}
                 >
                   Continuar
                 </Button>

@@ -37,5 +37,14 @@ export const ordersService = {
     const response = await apiClient.get('/orders/')
     return Array.isArray(response.data) ? response.data : response.data.results || []
   },
+
+  /**
+   * Cancelar un pedido en estado PENDING
+   * POST /api/orders/{orderId}/cancel/
+   */
+  cancelOrder: async (orderId) => {
+    const response = await apiClient.post(`/orders/${orderId}/cancel/`)
+    return response.data
+  },
 }
 
