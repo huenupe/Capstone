@@ -1,6 +1,8 @@
 # CondorShop - Backend API
 
-Backend Django 5.x con Django REST Framework para plataforma e-commerce académica.
+Backend Django 5.2.8 con Django REST Framework 3.16.1 para plataforma e-commerce académica. Integración completa con Webpay Plus (Transbank) para procesamiento de pagos. Base de datos PostgreSQL con soporte para Supabase.
+
+**Última actualización:** Noviembre 2025
 
 ## ⚡ Inicio Rápido
 
@@ -17,9 +19,36 @@ python manage.py runserver
 
 ## 📋 Requisitos
 
-- Python 3.11+
-- MySQL 8.0
-- pip
+- **Python**: 3.11+ (recomendado: 3.12)
+- **PostgreSQL**: 12+ (o Supabase)
+- **pip**: Última versión
+- **setuptools**: Requerido para Python 3.12+ (transbank-sdk depende de distutils)
+
+## 🛠️ Stack Tecnológico
+
+### Core
+- **Django**: 5.2.8
+- **Django REST Framework**: 3.16.1
+- **PostgreSQL**: 12+ (psycopg2-binary 2.9.9)
+
+### Autenticación y Seguridad
+- **djangorestframework-simplejwt**: 5.5.1 (JWT tokens)
+- **django-cors-headers**: 4.9.0 (CORS)
+- **django-ratelimit**: 4.1.0 (Rate limiting)
+
+### Utilidades
+- **django-filter**: 25.2 (Filtros avanzados)
+- **django-environ**: 0.12.0 (Variables de entorno)
+- **Pillow**: 11.0.0 (Procesamiento de imágenes)
+
+### Pagos
+- **transbank-sdk**: 3.0.0 (Webpay Plus)
+
+### Testing
+- **pytest**: 8.4.2
+- **pytest-django**: 4.11.1
+- **pytest-cov**: 7.0.0
+- **factory-boy**: 3.3.0
 
 ## 🚀 Instalación
 
@@ -50,13 +79,15 @@ pip install -r requirements.txt
 copy .env.example .env  # Windows
 # cp .env.example .env   # Linux/Mac
 
-# Editar .env con tus credenciales de base de datos
+# Editar .env con tus credenciales
 ```
 
-4. **Crear la base de datos MySQL:**
+4. **Crear la base de datos PostgreSQL:**
 ```sql
-CREATE DATABASE condorshop CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE condorshop;
 ```
+
+O si usas Supabase, crear el proyecto y obtener las credenciales de conexión.
 
 5. **Ejecutar migraciones:**
 ```bash
@@ -89,20 +120,36 @@ El servidor estará disponible en: http://127.0.0.1:8000/
 El archivo `.env` debe contener las siguientes variables:
 
 ### Requeridas
+
 - `SECRET_KEY`: Clave secreta de Django (generar una única con al menos 50 caracteres)
 - `DEBUG`: `True` para desarrollo, `False` para producción
-- `DB_NAME`: Nombre de la base de datos (default: `condorshop`)
-- `DB_USER`: Usuario de MySQL
-- `DB_PASSWORD`: Contraseña de MySQL
-- `DB_HOST`: Host de MySQL (default: `localhost`)
-- `DB_PORT`: Puerto de MySQL (default: `3306`)
+- `DB_NAME`: Nombre de la base de datos PostgreSQL
+- `DB_USER`: Usuario de PostgreSQL
+- `DB_PASSWORD`: Contraseña de PostgreSQL
+- `DB_HOST`: Host de PostgreSQL (default: `localhost`, para Supabase: `db.xxxxx.supabase.co`)
+- `DB_PORT`: Puerto de PostgreSQL (default: `5432`)
 
 ### Opcionales
-- `ALLOWED_HOSTS`: Lista de hosts permitidos (default: `localhost,127.0.0.1`)
+
+- `ALLOWED_HOSTS`: Lista de hosts permitidos separados por comas (default: `localhost,127.0.0.1`)
 - `CORS_ALLOWED_ORIGINS`: URLs del frontend separadas por comas (default: `http://localhost:5173,http://127.0.0.1:5173`)
 - `CSRF_TRUSTED_ORIGINS`: URLs confiables para CSRF (default: igual que CORS)
 - `JWT_EXPIRATION_HOURS`: Horas de expiración del token JWT (default: `24`)
 - `EMAIL_BACKEND`: Backend de email (default: `django.core.mail.backends.console.EmailBackend`)
+- `FRONTEND_RESET_URL`: URL del frontend para reset de contraseña (default: `http://localhost:5173/reset-password`)
+- `PASSWORD_RESET_TIMEOUT_HOURS`: Horas de validez del token de reset (default: `1`)
+
+### Webpay Plus (Transbank)
+
+**⚠️ IMPORTANTE:** Estas variables son requeridas para procesar pagos reales. Para desarrollo/testing, se usan valores por defecto de integración.
+
+- `WEBPAY_ENVIRONMENT`: Ambiente de Webpay (`integration` para testing, `production` para producción)
+- `WEBPAY_COMMERCE_CODE`: Código de comercio de Transbank (default en integración: `597055555532`)
+- `WEBPAY_API_KEY`: API Key de Transbank (default en integración: `579B532A7440BB0C9079DED94D31EA1615BACEB56610332264630D42D0A36B1C`)
+- `WEBPAY_RETURN_URL`: URL de callback de Webpay (default: `http://localhost:8000/api/payments/return/`)
+- `WEBPAY_FINAL_URL`: URL final después del pago (default: `http://localhost:5173/payment/result`)
+
+**Nota:** En producción, `WEBPAY_RETURN_URL` y `WEBPAY_FINAL_URL` NO pueden usar `localhost`. Deben ser URLs públicas accesibles desde internet.
 
 ### Generar SECRET_KEY
 
@@ -112,28 +159,79 @@ python -c "from django.core.management.utils import get_random_secret_key; print
 
 **⚠️ IMPORTANTE:** Nunca compartas tu `SECRET_KEY` ni la subas a control de versiones.
 
+## ✨ Funcionalidades Principales
+
+### Catálogo y Productos
+- ✅ Listado paginado de productos (20 por página)
+- ✅ Búsqueda avanzada (`name__istartswith` con índice, `search` con `icontains`)
+- ✅ Filtros por categoría, rango de precios, estado activo
+- ✅ Ordenamiento por precio, fecha de creación
+- ✅ Categorías con jerarquía (parent/child)
+- ✅ Historial automático de precios (signals)
+- ✅ Control de inventario con reservas y liberaciones
+
+### Carrito de Compras
+- ✅ Carrito para usuarios autenticados
+- ✅ Carrito para invitados (con `X-Session-Token`)
+- ✅ Fusión automática al autenticarse
+- ✅ Validación de stock en tiempo real
+- ✅ Precios fijados al agregar al carrito
+
+### Checkout y Pedidos
+- ✅ Checkout multipaso (usuario autenticado e invitado)
+- ✅ Cotización de envío en tiempo real
+- ✅ Snapshots de productos y envío (preservan datos históricos)
+- ✅ Validación transaccional de stock (`select_for_update()`)
+- ✅ Estados de pedido: PENDING, PAID, FAILED, CANCELLED, PREPARING, SHIPPED, DELIVERED
+- ✅ Cancelación de pedidos pendientes
+
+### Pagos Webpay Plus
+- ✅ Integración completa con Transbank Webpay Plus
+- ✅ Creación y confirmación de transacciones
+- ✅ Manejo de callbacks de Webpay
+- ✅ Prevención de duplicados (constraint único + verificación proactiva)
+- ✅ Registro completo de transacciones (PaymentTransaction)
+
+### Autenticación y Usuarios
+- ✅ Registro y login con JWT
+- ✅ Recuperación de contraseña (email con token)
+- ✅ Perfil de usuario editable
+- ✅ Gestión de direcciones (CRUD)
+- ✅ Roles: cliente y admin
+
+### Sistema de Envíos
+- ✅ Reglas de envío por producto, categoría o general
+- ✅ Zonas de envío (regiones)
+- ✅ Cálculo de costos de envío
+- ✅ Envío gratis configurable (umbral en `StoreConfig`)
+
+### Auditoría
+- ✅ Registro automático de acciones (middleware)
+- ✅ Logs de cambios en modelos críticos
+
 ## Estructura del Proyecto
 
 ```
 backend/
 ├── condorshop_api/     # Configuración del proyecto
 ├── apps/
-│   ├── users/          # Usuarios y autenticación
-│   ├── products/       # Catálogo de productos
-│   ├── cart/           # Carrito de compras
-│   ├── orders/         # Pedidos y estados
-│   └── audit/          # Auditoría
+│   ├── common/         # Utilidades compartidas (Currency, StoreConfig)
+│   ├── users/          # Usuarios, autenticación, direcciones
+│   ├── products/       # Catálogo de productos, categorías
+│   ├── cart/           # Carrito de compras (usuarios y sesiones)
+│   ├── orders/         # Pedidos, pagos, envíos, Webpay
+│   └── audit/          # Sistema de auditoría automática
 └── media/              # Archivos multimedia
 ```
 
-### Productos / Descuentos
+### Apps y Responsabilidades
 
-**Descuentos:**
-- `discount_percent`: entero 1-100
-- `discount_amount` y `discount_price`: enteros (CLP)
-- Precedencia de cálculo: `final_price` > `amount` > `percent`
-- Todos los precios se manejan como enteros en pesos (sin decimales)
-- El campo `price` se almacena como `DecimalField` con dos decimales y DRF lo expone como string (ej: `"45990.00"`). Los campos calculados `final_price`, `discount_price`, `discount_amount` y `calculated_discount_percent` se devuelven como enteros en CLP para facilitar el formateo en frontend.
+- **`apps.common`**: Utilidades compartidas, configuración global (`StoreConfig`), helpers de formato
+- **`apps.users`**: Modelo de usuario personalizado, autenticación JWT, recuperación de contraseña, gestión de direcciones
+- **`apps.products`**: Productos, categorías (con jerarquía), imágenes, historial de precios, control de inventario
+- **`apps.cart`**: Carritos de compra para usuarios autenticados e invitados (con `X-Session-Token`)
+- **`apps.orders`**: Pedidos, estados, snapshots, reglas de envío, integración Webpay Plus
+- **`apps.audit`**: Registro automático de acciones mediante middleware
 
 ## 📡 Endpoints de la API
 
@@ -152,7 +250,6 @@ Actualmente todos los endpoints viven bajo el prefijo `/api/` (sin número de ve
 | POST | `/api/auth/forgot-password` | Solicitar recuperación de contraseña (siempre responde 200) | `AllowAny` |
 | POST | `/api/auth/reset-password` | Restablecer contraseña con un token válido | `AllowAny` |
 | GET | `/api/auth/verify-reset-token/{token}/` | Verificar si el token es válido antes de mostrar el formulario | `AllowAny` |
-| GET/PATCH | `/api/users/profile` | Ver/editar perfil de usuario | `IsAuthenticated` |
 
 **Ejemplo de respuesta de login:**
 ```json
@@ -177,6 +274,18 @@ Actualmente todos los endpoints viven bajo el prefijo `/api/` (sin número de ve
 - El enlace enviado apunta al frontend (`FRONTEND_RESET_URL`) e incluye el token como querystring.
 - Las solicitudes y confirmaciones quedan registradas en auditoría cuando el módulo está disponible.
 
+### Usuarios (`/api/users/`)
+
+| Método | Endpoint | Descripción | Permisos |
+|--------|----------|-------------|----------|
+| GET/PATCH | `/api/users/profile` | Ver/editar perfil de usuario | `IsAuthenticated` |
+| DELETE | `/api/users/me` | Desactivar cuenta del usuario autenticado | `IsAuthenticated` |
+| GET | `/api/users/addresses` | Listar direcciones del usuario | `IsAuthenticated` |
+| POST | `/api/users/addresses` | Crear nueva dirección | `IsAuthenticated` |
+| GET | `/api/users/addresses/{id}` | Obtener detalle de dirección | `IsAuthenticated` |
+| PATCH | `/api/users/addresses/{id}` | Actualizar dirección | `IsAuthenticated` |
+| DELETE | `/api/users/addresses/{id}` | Eliminar dirección | `IsAuthenticated` |
+
 ### Productos (`/api/products/`)
 
 | Método | Endpoint | Descripción | Permisos |
@@ -184,6 +293,7 @@ Actualmente todos los endpoints viven bajo el prefijo `/api/` (sin número de ve
 | GET | `/api/products/` | Listado con paginación, búsqueda, filtros | `IsAuthenticatedOrReadOnly` |
 | GET | `/api/products/{slug}/` | Detalle de producto | `IsAuthenticatedOrReadOnly` |
 | GET | `/api/products/categories/` | Listado de categorías | `IsAuthenticatedOrReadOnly` |
+| GET | `/api/products/{slug}/price-history/` | Historial de precios del producto | `IsAuthenticatedOrReadOnly` |
 
 **Parámetros de consulta:**
 - `search`: Búsqueda en nombre y descripción
@@ -213,7 +323,7 @@ Puedes solicitar un tamaño de página distinto con `page_size` (máximo 100).
 |--------|----------|-------------|----------|
 | GET | `/api/cart/` | Ver carrito actual | `AllowAny` |
 | POST | `/api/cart/add` | Agregar producto al carrito | `AllowAny` |
-| PATCH | `/api/cart/items/{id}/` | Actualizar cantidad de item | `AllowAny` |
+| PATCH | `/api/cart/items/{id}` | Actualizar cantidad de item | `AllowAny` |
 | DELETE | `/api/cart/items/{id}/delete` | Eliminar item del carrito | `AllowAny` |
 
 **Flujo de invitados:** Si la petición llega sin autenticación, el backend genera automáticamente un `X-Session-Token`, lo devuelve en los headers de la respuesta y lo reutiliza para enlazar el carrito invitado entre solicitudes. El frontend solo debe reenviar ese header en peticiones subsecuentes; si el token no se entrega, el backend emitirá uno nuevo.
@@ -244,12 +354,81 @@ El módulo de órdenes expone los mismos endpoints bajo dos prefijos por conveni
 |--------|----------|-------------|----------|
 | GET | `/api/orders/` | Historial de pedidos del usuario autenticado | `IsAuthenticated` |
 | GET | `/api/orders/{id}/` | Detalle de un pedido del usuario | `IsAuthenticated` |
+| POST | `/api/orders/{id}/pay/` | Iniciar pago Webpay para una orden | `IsAuthenticated` |
+| POST | `/api/orders/{id}/cancel/` | Cancelar un pedido pendiente | `IsAuthenticated` |
 
-#### Pagos / Webpay
+#### Pagos / Webpay Plus
 
-- El proyecto contempla Webpay como pasarela principal, pero la integración se mantiene en modo *placeholder*.  
-- Endpoints como `/api/payments/webpay/create` y `/api/payments/webpay/commit` aún no están implementados; cuando se habiliten se documentará el flujo completo (crear → redirigir al gateway → retornar → confirmar) junto con las variables `WEBPAY_*` necesarias en `.env`.
-++ End Patch
+**✅ INTEGRACIÓN COMPLETA Y FUNCIONAL**
+
+| Método | Endpoint | Descripción | Permisos |
+|--------|----------|-------------|----------|
+| POST | `/api/checkout/{order_id}/pay/` o `/api/orders/{order_id}/pay/` | Iniciar transacción de pago Webpay | `IsAuthenticated` |
+| GET/POST | `/api/payments/return/` | Callback de retorno de Webpay (llamado por Transbank) | `AllowAny` |
+| GET | `/api/payments/status/{order_id}/` | Consultar estado de pago de una orden | `IsAuthenticated` |
+
+**Flujo completo de pago:**
+
+1. **Crear orden:** `POST /api/checkout/create` → Retorna `order_id`
+2. **Iniciar pago:** `POST /api/orders/{order_id}/pay/` → Retorna `{ token, url, buy_order }`
+3. **Redirigir a Webpay:** Frontend redirige al usuario a `url` con `token_ws`
+4. **Usuario paga en Webpay:** Transbank procesa el pago
+5. **Callback:** Webpay llama a `/api/payments/return/?token_ws=XXX`
+6. **Confirmación:** Backend confirma la transacción y actualiza el estado de la orden
+7. **Redirección:** Usuario es redirigido a `WEBPAY_FINAL_URL` con parámetros de estado
+8. **Verificación:** Frontend puede consultar `/api/payments/status/{order_id}/` para obtener detalles completos
+
+**Formato del buy_order:**
+- Máximo 26 caracteres (límite de Transbank)
+- Formato: `ORD-{order_id}-{timestamp_compact}`
+- Incluye microsegundos para garantizar unicidad
+- Verificación proactiva de duplicados antes de crear transacción
+- Constraint único en base de datos (migración 0013)
+
+**Ejemplo de respuesta de iniciar pago:**
+```json
+{
+  "token": "01ab37d5090650ad055fed59e5e92224c2598883ef40656744...",
+  "url": "https://webpay3gint.transbank.cl/webpayserver/initTransaction",
+  "buy_order": "ORD-1-251118234635443",
+  "order_id": 1,
+  "amount": 112471
+}
+```
+
+**Ejemplo de respuesta de estado de pago:**
+```json
+{
+  "order_id": 1,
+  "order_status": "PAID",
+  "order_status_name": "Pagado",
+  "amount": 112471,
+  "currency": "CLP",
+  "transaction_data": {
+    "authorization_code": "123456",
+    "transaction_date": "2025-11-18T23:46:35Z",
+    "card_brand": "VISA",
+    "card_last_four": "1234",
+    "installments_number": 1
+  },
+  "items": [
+    {
+      "name": "Producto Ejemplo",
+      "quantity": 2,
+      "total_price": 112471
+    }
+  ]
+}
+```
+
+**⚠️ IMPORTANTE - localhost funciona:**
+- ✅ La integración Webpay Plus funciona correctamente con `localhost:8000` y `localhost:5173` en desarrollo
+- ✅ No es necesario usar `ngrok` u otras herramientas de tunneling para desarrollo
+- ✅ En producción, `WEBPAY_RETURN_URL` y `WEBPAY_FINAL_URL` deben ser URLs públicas
+
+**Tarjetas de prueba (ambiente integración):**
+- **Aprobar:** 4051885600446623 (cualquier CVV, fecha futura)
+- **Rechazar:** 4051885600446624 (cualquier CVV, fecha futura)
 
 ### Administración
 
@@ -316,6 +495,7 @@ El backend está configurado con las mejores prácticas de seguridad:
 - ✅ **CSRF** protection habilitado
 - ✅ **Rate limiting** en endpoints críticos
 - ✅ **Validación de contraseñas** con validadores de Django
+- ✅ **SSL/TLS** requerido para conexiones PostgreSQL (Supabase)
 
 ### CORS y CSRF
 
@@ -338,18 +518,52 @@ Los logs incluyen información sobre:
 - Endpoint accedido
 - Errores y excepciones
 
+**Logs de Webpay:** Todos los logs relacionados con Webpay tienen el prefijo `[WEBPAY]` para fácil identificación:
+```
+INFO [WEBPAY] Verificando buy_orders duplicados antes de crear...
+INFO [WEBPAY] buy_order único generado: 'ORD-1-251118234635443'
+INFO [WEBPAY] transaction.create() ejecutado sin excepciones
+```
+
 ## 🗄️ Base de Datos
 
 ### Modelos Principales
 
-- **users.User**: Modelo de usuario personalizado
-- **products.Product**: Catálogo de productos
-- **products.Category**: Categorías de productos
-- **cart.Cart**: Carritos de compra
-- **orders.Order**: Pedidos
-- **orders.OrderStatus**: Estados de pedido
-- **orders.Payment**: Pagos
-- **audit.AuditLog**: Bitácora de auditoría
+#### Usuarios (`apps.users`)
+- **`User`**: Modelo de usuario personalizado (extiende `AbstractUser`), email como `USERNAME_FIELD`, roles (cliente/admin)
+- **`Address`**: Direcciones de envío de usuarios
+- **`PasswordResetToken`**: Tokens para recuperación de contraseña
+
+#### Productos (`apps.products`)
+- **`Category`**: Categorías con jerarquía (`parent_category`, `level`, `sort_order`), imágenes
+- **`Product`**: Productos con precios (enteros CLP), descuentos, stock, peso, imágenes, slug único
+- **`ProductImage`**: Imágenes de productos con ordenamiento (`position`)
+- **`ProductPriceHistory`**: Historial automático de cambios de precio (registrado vía signals)
+- **`InventoryMovement`**: Movimientos de inventario (reservas, liberaciones, ventas)
+
+#### Carrito (`apps.cart`)
+- **`Cart`**: Carritos de compra (usuarios autenticados o invitados con `session_token`)
+- **`CartItem`**: Items del carrito con producto, cantidad y precio fijado
+
+#### Pedidos (`apps.orders`)
+- **`OrderStatus`**: Estados de pedido (PENDING, PAID, FAILED, CANCELLED, PREPARING, SHIPPED, DELIVERED)
+- **`Order`**: Pedidos con usuario (puede ser NULL para invitados), estado, monto total, costo de envío
+- **`OrderItem`**: Items del pedido con snapshot de producto
+- **`OrderItemSnapshot`**: Snapshot de datos de producto al momento de crear pedido
+- **`OrderShippingSnapshot`**: Snapshot de datos de envío al momento de crear pedido
+- **`PaymentTransaction`**: Transacciones de pago Webpay (token, buy_order, gateway_response, estado)
+- **`PaymentStatus`**: Estados de pago (pending, approved, rejected, cancelled)
+- **`ShippingZone`**: Zonas de envío (regiones)
+- **`ShippingCarrier`**: Transportistas
+- **`ShippingRule`**: Reglas de envío (por producto, categoría o general) con prioridad
+
+#### Utilidades (`apps.common`)
+- **`StoreConfig`**: Configuración global del sistema (parámetros configurables sin código)
+- **`Currency`**: Utilidades de formato de moneda
+- **`HeroCarousel`**: Carrusel principal de la página de inicio
+
+#### Auditoría (`apps.audit`)
+- **`AuditLog`**: Registro automático de acciones mediante middleware
 
 ### Estados de Pedido
 
@@ -369,6 +583,14 @@ El checkout utiliza transacciones atómicas con `SELECT FOR UPDATE` para:
 - Prevenir condiciones de carrera
 - Garantizar que el stock se actualiza correctamente
 - Revertir cambios si hay error
+
+### Migraciones Importantes
+
+- **0008_refactor_payment_transactions_webpay**: Refactor completo de PaymentTransaction con campos Webpay específicos
+- **0010_add_performance_indexes**: Optimización de índices en productos, carrito y pedidos
+- **0013_add_unique_constraint_webpay_buy_order**: Agrega constraint único en `webpay_buy_order` para prevenir duplicados (Error 21 de Transbank). **CRÍTICA** - Debe aplicarse antes de usar Webpay en producción.
+- **Migración monetaria (0004)**: Conversión de DecimalField a PositiveIntegerField (CLP enteros)
+- **Migración PostgreSQL**: Cambio de MySQL a PostgreSQL con configuración SSL para Supabase
 
 ## 🚀 Despliegue
 
@@ -408,6 +630,8 @@ pip-audit
 4. **Configurar `CSRF_TRUSTED_ORIGINS`** con la URL del frontend
 5. **Configurar HTTPS** en el servidor web (Nginx/Apache)
 6. **Usar un backend de email** real (no `console.EmailBackend`)
+7. **Configurar variables de Webpay** con credenciales de producción
+8. **Asegurar que `WEBPAY_RETURN_URL` y `WEBPAY_FINAL_URL`** sean URLs públicas (no localhost)
 
 ### Variables de Entorno en Producción
 
@@ -418,16 +642,51 @@ ALLOWED_HOSTS=condorshop.com,www.condorshop.com
 CORS_ALLOWED_ORIGINS=https://condorshop.com,https://www.condorshop.com
 CSRF_TRUSTED_ORIGINS=https://condorshop.com,https://www.condorshop.com
 SECURE_SSL_REDIRECT=True
+
+# PostgreSQL/Supabase
+DB_NAME=condorshop
+DB_USER=<usuario>
+DB_PASSWORD=<contraseña>
+DB_HOST=db.xxxxx.supabase.co
+DB_PORT=5432
+
+# Webpay Producción
+WEBPAY_ENVIRONMENT=production
+WEBPAY_COMMERCE_CODE=<tu-codigo-comercio>
+WEBPAY_API_KEY=<tu-api-key>
+WEBPAY_RETURN_URL=https://api.condorshop.com/api/payments/return/
+WEBPAY_FINAL_URL=https://condorshop.com/payment/result
 ```
 
 ## 📝 Notas Importantes
 
-- ✅ El stock se descontará **transaccionalmente** al crear pedidos
-- ✅ Las imágenes se almacenan en `media/products/`
-- ✅ La auditoría registra acciones importantes en `audit_logs`
-- ✅ El sistema soporta **carritos de invitados** (sin autenticación)
-- ✅ Los precios se fijan al momento de agregar al carrito
-- ✅ El envío es **gratis** para compras sobre $50,000 CLP
+### Funcionalidades Core
+- ✅ El stock se descontará **transaccionalmente** al crear pedidos (con `select_for_update()`)
+- ✅ Las imágenes se almacenan en `media/products/` y `media/categorias/`
+- ✅ La auditoría registra acciones importantes en `audit_logs` (middleware automático)
+- ✅ El sistema soporta **carritos de invitados** (sin autenticación, con `X-Session-Token`)
+- ✅ Los precios se fijan al momento de agregar al carrito (no cambian después)
+- ✅ El envío es **gratis** para compras sobre $50,000 CLP (configurable en `StoreConfig`)
+- ✅ Los snapshots de pedidos capturan datos al momento de creación (precios, direcciones)
+- ✅ El historial de precios se registra automáticamente al cambiar precios (signals)
+
+### Webpay Plus
+- ✅ **Webpay Plus está completamente funcional** - No es un placeholder
+- ✅ **localhost funciona con Webpay** - No requiere tunneling en desarrollo
+- ✅ Constraint único en `webpay_buy_order` previene Error 21 de Transbank
+- ✅ Verificación proactiva de duplicados antes de crear transacción
+- ✅ Manejo seguro de JSONField en PostgreSQL (raw SQL con `::jsonb`)
+
+### Base de Datos
+- ✅ PostgreSQL con soporte para Supabase (SSL requerido)
+- ✅ Connection pooling configurado (CONN_MAX_AGE=600)
+- ✅ Índices optimizados para queries frecuentes
+- ✅ Transacciones atómicas con `ATOMIC_REQUESTS=True`
+
+### Moneda
+- ✅ **Todos los montos se manejan como enteros en CLP** (sin decimales)
+- ✅ Formateo de precios es responsabilidad del frontend
+- ✅ Cálculos de descuentos con redondeo half-up
 
 ### Rate limiting activo
 
@@ -459,3 +718,58 @@ Estos límites mitigan fuerza bruta y abuso; ajusta las reglas `@ratelimit` si c
   ```
 - Si la base de datos está inaccesible, responde con `503` y `"status": "unhealthy"`. Útil para probes de Kubernetes, load balancers o monitorización externa.
 
+## 🔧 Integración Webpay Plus - Detalles Técnicos
+
+### Servicio WebpayService
+
+El servicio `apps.orders.services.WebpayService` encapsula toda la lógica de Webpay:
+
+- **`create_transaction(order)`**: Crea una transacción en Webpay y retorna token y URL
+- **`confirm_transaction(token)`**: Confirma una transacción después del callback
+
+### Generación de buy_order
+
+El `buy_order` se genera con el siguiente formato:
+- Formato: `ORD-{order_id}-{YYMMDDHHMMSS}{microsegundos_3digitos}`
+- Ejemplo: `ORD-1-251118234635443` (21 caracteres)
+- Límite: 26 caracteres máximo (validación de Transbank SDK)
+- Unicidad: Verificación proactiva en BD antes de crear + constraint único
+
+### Manejo de gateway_response
+
+El campo `gateway_response` (JSONField) se maneja con raw SQL para evitar errores de deserialización cuando PostgreSQL devuelve JSONB como dict de Python.
+
+### Logs y Debugging
+
+Todos los logs de Webpay tienen prefijo `[WEBPAY]`:
+```
+INFO [WEBPAY] Verificando buy_orders duplicados antes de crear...
+INFO [WEBPAY] buy_order único generado: 'ORD-1-251118234635443'
+INFO [WEBPAY] transaction.create() ejecutado sin excepciones
+ERROR [WEBPAY] ERROR: Error al crear transacción: ...
+```
+
+### Correcciones Implementadas (Noviembre 2025)
+
+1. **Límite de buy_order corregido:** De 64 a 26 caracteres (límite real de Transbank)
+2. **Formato optimizado:** `ORD-{id}-{timestamp}` en lugar de `ORDER-{id}-{timestamp}` (21 caracteres)
+3. **Microsegundos:** Incluidos para mayor unicidad
+4. **Constraint único:** Migración 0013 previene duplicados a nivel de BD
+5. **Verificación proactiva:** Chequea duplicados antes de crear transacción
+6. **Manejo seguro de JSONField:** Raw SQL para evitar errores de deserialización en PostgreSQL
+7. **Migración MySQL → PostgreSQL:** Configuración SSL, psycopg2-binary, django.contrib.postgres
+8. **Optimización de índices:** Índices en campos críticos para mejorar performance
+9. **Migración monetaria:** Conversión a CLP enteros para evitar problemas de precisión
+
+## 🔧 Comandos de Gestión Disponibles
+
+### Comandos Django
+- `python manage.py load_initial_data` - Cargar datos de ejemplo (categorías, productos, usuarios)
+- `python manage.py analyze_indexes` - Analizar uso de índices en queries críticas
+- `python manage.py release_expired_reservations` - Liberar reservas de stock expiradas
+- `python manage.py clean_payment_transactions` - Limpiar transacciones antiguas
+
+### Testing
+- `pytest` - Ejecutar todos los tests
+- `pytest -v` - Ejecutar tests con output verbose
+- `pytest --cov` - Ejecutar tests con cobertura de código

@@ -487,6 +487,15 @@ class PaymentTransaction(models.Model):
             models.Index(fields=['webpay_token'], name='idx_payment_webpay_token'),
             models.Index(fields=['created_at'], name='idx_payment_tx_created'),
         ]
+        constraints = [
+            # Constraint único en webpay_buy_order para prevenir duplicados (Error 21)
+            # Solo aplica cuando webpay_buy_order no es NULL
+            models.UniqueConstraint(
+                fields=['webpay_buy_order'],
+                condition=models.Q(webpay_buy_order__isnull=False),
+                name='idx_payment_buy_order_unique'
+            ),
+        ]
 
     def __str__(self):
         return f"Payment {self.id} - {self.payment_method} - {self.status}"

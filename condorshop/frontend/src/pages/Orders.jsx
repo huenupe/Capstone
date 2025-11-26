@@ -45,13 +45,19 @@ const Orders = () => {
   }, [loadOrders])
 
   const getStatusBadge = (status) => {
+    // Mapeo de colores por código de estado (el label viene del backend en español)
     const statusColors = {
       PENDING: 'bg-yellow-100 text-yellow-800',
-      CONFIRMED: 'bg-blue-100 text-blue-800',
+      PAID: 'bg-blue-100 text-blue-800',
+      FAILED: 'bg-red-100 text-red-800',
+      CANCELLED: 'bg-red-100 text-red-800',
+      PREPARING: 'bg-orange-100 text-orange-800',
       SHIPPED: 'bg-purple-100 text-purple-800',
       DELIVERED: 'bg-green-100 text-green-800',
-      CANCELLED: 'bg-red-100 text-red-800',
     }
+    
+    // Usar la descripción del backend (ya viene en español)
+    const label = status?.description || status?.code || 'Desconocido'
     
     return (
       <span
@@ -59,7 +65,7 @@ const Orders = () => {
           statusColors[status?.code] || 'bg-gray-100 text-gray-800'
         }`}
       >
-        {status?.name || status?.code || 'Desconocido'}
+        {label}
       </span>
     )
   }

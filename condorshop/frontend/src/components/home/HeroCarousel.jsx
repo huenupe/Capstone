@@ -1,38 +1,72 @@
 import { useState, useEffect } from 'react'
+import { commonService } from '../../services/common'
+import Spinner from '../common/Spinner'
 
 const HeroCarousel = () => {
   const [currentSlide, setCurrentSlide] = useState(0)
-  
-  // Placeholder slides - can be replaced with real images
-  const slides = [
-    { 
-      id: 1, 
-      image: '/hero/slide1.jpg',
-      alt: 'Ofertas especiales en productos seleccionados'
-    },
-    { 
-      id: 2, 
-      image: '/hero/slide2.jpg',
-      alt: 'Nuevos productos disponibles'
-    },
-    { 
-      id: 3, 
-      image: '/hero/slide3.jpg',
-      alt: 'Descuentos increíbles esta temporada'
-    },
-    { 
-      id: 4, 
-      image: '/hero/slide4.jpg',
-      alt: 'Envío gratis en compras sobre $50.000'
-    },
-    { 
-      id: 5, 
-      image: '/hero/slide5.jpg',
-      alt: 'Tendencias de la temporada'
-    },
-  ]
+  const [slides, setSlides] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
+  // Cargar slides del backend
   useEffect(() => {
+    let isMounted = true // Flag para evitar actualizar estado si el componente se desmonta
+
+    const loadSlides = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const data = await commonService.getHeroCarouselSlides()
+        
+        // Verificar que el componente aún esté montado
+        if (!isMounted) return
+        
+        // Validar y ordenar slides
+        if (!Array.isArray(data)) {
+          console.warn('[HeroCarousel] Datos recibidos no son un array:', data)
+          if (isMounted) {
+            setSlides([])
+            setError('Formato de datos inválido')
+          }
+          return
+        }
+        
+        // Filtrar slides válidos y ordenar por 'order'
+        const validSlides = data
+          .filter(slide => slide && slide.id && slide.image_url)
+          .sort((a, b) => (a.order || 0) - (b.order || 0))
+        
+        if (isMounted) {
+          setSlides(validSlides)
+          if (validSlides.length === 0 && data.length > 0) {
+            setError('Las imágenes no están disponibles')
+          }
+        }
+      } catch (err) {
+        console.error('[HeroCarousel] Error al cargar slides:', err)
+        if (isMounted) {
+          setError('No se pudieron cargar las imágenes del carrusel')
+          setSlides([]) // Fallback a array vacío
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadSlides()
+    
+    // Cleanup: prevenir actualizaciones de estado si el componente se desmonta
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  // Auto-play cuando hay slides
+  useEffect(() => {
+    if (slides.length === 0) return
+
     const timer = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % slides.length)
     }, 5000) // Auto-play every 5 seconds
@@ -54,15 +88,34 @@ const HeroCarousel = () => {
 
   const handleImageError = (e) => {
     // Fallback to gradient placeholder if image doesn't exist
+    console.warn('[HeroCarousel] Error al cargar imagen:', e.target.src)
     e.target.style.display = 'none'
-    const placeholder = e.target.parentElement.querySelector('.placeholder-gradient')
+    const placeholder = e.target.parentElement?.parentElement?.querySelector('.placeholder-gradient')
     if (placeholder) {
       placeholder.style.display = 'flex'
     }
   }
 
+  // Mostrar spinner mientras carga
+  if (loading) {
+    return (
+      <div className="relative w-full h-[400px] md:h-[500px] lg:h-[600px] overflow-hidden bg-gray-200 flex items-center justify-center">
+        <Spinner />
+      </div>
+    )
+  }
+
+  // Mostrar mensaje de error o placeholder si no hay slides
+  if (error || slides.length === 0) {
+    return (
+      <div className="relative w-full h-[400px] md:h-[500px] lg:h-[600px] overflow-hidden bg-gradient-to-r from-primary-400 to-primary-600 flex items-center justify-center text-white text-xl">
+        {error || 'No hay imágenes disponibles en el carrusel'}
+      </div>
+    )
+  }
+
   return (
-    <div className="relative w-full h-[360px] md:h-[480px] overflow-hidden bg-gray-200 rounded-lg mb-8">
+    <div className="relative w-full h-[400px] md:h-[500px] lg:h-[600px] overflow-hidden bg-gray-900">
       {/* Slides */}
       {slides.map((slide, index) => (
         <div
@@ -72,16 +125,17 @@ const HeroCarousel = () => {
           }`}
         >
           <img
-            src={slide.image}
-            alt={slide.alt}
-            className="w-full h-full object-cover"
+            src={slide.image_url}
+            alt={slide.alt_text || slide.name || 'Slide del carrusel'}
+            className="w-full h-full object-cover object-center"
             onError={handleImageError}
+            loading={index === 0 ? 'eager' : 'lazy'}
           />
           {/* Placeholder gradient if image fails to load */}
           <div 
-            className="placeholder-gradient hidden w-full h-full items-center justify-center bg-gradient-to-r from-primary-400 to-primary-600 text-white text-2xl font-bold"
+            className="placeholder-gradient hidden absolute inset-0 w-full h-full items-center justify-center bg-gradient-to-r from-primary-400 to-primary-600 text-white text-2xl font-bold px-4 text-center"
           >
-            {slide.alt}
+            {slide.alt_text || slide.name || 'Slide del carrusel'}
           </div>
         </div>
       ))}

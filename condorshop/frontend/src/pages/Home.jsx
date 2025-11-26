@@ -159,10 +159,11 @@ const Home = () => {
   // Default Home view with carousel, categories, and rails
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* 1. Hero Carousel */}
-        <HeroCarousel />
+      {/* 1. Hero Carousel - Full width, outside container */}
+      <HeroCarousel />
 
+      {/* 2. Rest of content in container */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* 2. Category Grid */}
         <CategoryGrid />
 

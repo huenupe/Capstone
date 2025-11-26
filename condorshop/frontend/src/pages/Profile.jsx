@@ -10,6 +10,7 @@ import { useAuthStore } from '../store/authSlice'
 import { useToast } from '../components/common/Toast'
 import { validateName, validateChileanPhone } from '../utils/validations'
 import AddressForm from '../components/profile/AddressForm'
+import OrderHistory from '../components/profile/OrderHistory'
 import apiClient from '../services/apiClient'
 import { REGIONS } from '../constants/regions'
 
@@ -458,6 +459,11 @@ const Profile = () => {
                   }}
                 />
               )}
+        </div>
+
+        {/* Sección de Historial de Compras */}
+        <div className="bg-white shadow-md rounded-lg p-8 mt-6">
+          <OrderHistory />
         </div>
       </div>
     </div>

@@ -174,8 +174,13 @@ def evaluate_shipping(region: Optional[str], subtotal, cart_items: Optional[Iter
 
 def send_order_confirmation_email(order):
     """
-    Prepara el envío de email de confirmación de pedido
-    Se completará cuando se integre Webpay
+    Envía email de confirmación de pedido al cliente.
+    
+    Args:
+        order: Orden confirmada (Order)
+    
+    Returns:
+        bool: True si el email se envió exitosamente, False en caso de error
     """
     # Obtener datos del cliente desde shipping_snapshot
     customer_name = ''
@@ -184,31 +189,38 @@ def send_order_confirmation_email(order):
         customer_name = order.shipping_snapshot.customer_name or ''
         customer_email = order.shipping_snapshot.customer_email or ''
     
+    # Validar que hay email del cliente
+    if not customer_email:
+        logger.warning(f"No se puede enviar email de confirmación para pedido #{order.id}: email del cliente no disponible")
+        return False
+    
     subject = f'Confirmación de pedido #{order.id} - CondorShop'
-    message = f"""
-    Hola {customer_name},
+    message = f"""Hola {customer_name},
 
-    Tu pedido #{order.id} ha sido confirmado.
+Tu pedido #{order.id} ha sido confirmado.
 
-    Total: ${order.total_amount:,.0f} CLP
-    Estado: {order.status.description}
+Total: ${order.total_amount:,.0f} CLP
+Estado: {order.status.description}
 
-    Gracias por tu compra!
+Gracias por tu compra!
 
-    CondorShop
-    """
+CondorShop
+"""
 
-    # Por ahora solo prepara el email, no lo envía
-    # Se implementará cuando se integre Webpay
-    # send_mail(
-    #     subject=subject,
-    #     message=message,
-    #     from_email=settings.DEFAULT_FROM_EMAIL,
-    #     recipient_list=[customer_email],
-    #     fail_silently=False,
-    # )
-
-    return True
+    # Enviar email de confirmación
+    try:
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[customer_email],
+            fail_silently=False,
+        )
+        logger.info(f"Email de confirmación enviado para pedido #{order.id} a {customer_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Error enviando email de confirmación para pedido #{order.id}: {str(e)}")
+        return False
 
 
 # ============================================
@@ -341,33 +353,6 @@ class WebpayService:
                     'url': url
                 }
             
-            # Verificar si hay buy_orders duplicados en las últimas 24 horas (para evitar Error 21)
-            logger.info(f"[WEBPAY] Verificando buy_orders duplicados...")
-            try:
-                from django.db import connection
-                from django.utils import timezone
-                from datetime import timedelta
-                
-                # Buscar buy_orders similares en las últimas 24 horas
-                with connection.cursor() as cursor:
-                    cursor.execute("""
-                        SELECT webpay_buy_order, COUNT(*) as count
-                        FROM payment_transactions 
-                        WHERE webpay_buy_order LIKE %s 
-                        AND created_at > %s
-                        GROUP BY webpay_buy_order
-                        HAVING COUNT(*) > 1
-                    """, [f"ORDER-{order.id}-%", timezone.now() - timedelta(hours=24)])
-                    duplicates = cursor.fetchall()
-                    if duplicates:
-                        logger.warning(f"[WEBPAY] ADVERTENCIA: Se encontraron {len(duplicates)} buy_orders potencialmente duplicados")
-                        for dup in duplicates:
-                            logger.warning(f"[WEBPAY]   - Buy Order: {dup[0]}, Count: {dup[1]}")
-            except Exception as e:
-                logger.error(f"[WEBPAY] ERROR al verificar buy_orders duplicados: {type(e).__name__}: {str(e)}")
-                logger.error(f"[WEBPAY] Traceback:", exc_info=True)
-                # Continuar de todas formas - no es crítico
-
             # Validar monto de la orden
             if not order.total_amount or order.total_amount <= 0:
                 logger.error(f"[WEBPAY] Orden {order.id} tiene monto inválido: {order.total_amount}")
@@ -389,14 +374,95 @@ class WebpayService:
                 logger.error(f"[WEBPAY] Monto muy alto: {amount}")
                 return False, "El monto excede el límite permitido", None
 
-            # Generar buy_order único (máximo 64 caracteres según documentación Transbank)
-            # Formato: ORDER-{order_id}-{timestamp}
-            timestamp = timezone.now().strftime('%Y%m%d%H%M%S')
-            buy_order = f"ORDER-{order.id}-{timestamp}"
-            # Asegurar que no exceda 64 caracteres
-            if len(buy_order) > 64:
-                buy_order = buy_order[:64]
-                logger.warning(f"[WEBPAY] buy_order truncado a 64 caracteres: {buy_order}")
+            # Generar buy_order único (máximo 26 caracteres según validación de Transbank SDK)
+            # Formato optimizado: {order_id}-{timestamp_compacto}
+            # Usar microsegundos para evitar colisiones en el mismo segundo
+            from datetime import timedelta
+            now = timezone.now()
+            # Formato compacto: YYMMDDHHMMSS + últimos 3 dígitos de microsegundos
+            # Esto nos da 12 dígitos de timestamp + hasta 10 caracteres para "ORDER-{id}-" = 22 caracteres máximo
+            timestamp_compact = now.strftime('%y%m%d%H%M%S') + str(now.microsecond)[-3:]  # Últimos 3 dígitos de microsegundos
+            # Formato: ORDER-{order_id}-{timestamp_compact}
+            # Ejemplo: ORDER-1-251118234517454 (26 caracteres máximo)
+            buy_order = f"ORD-{order.id}-{timestamp_compact}"
+            
+            # Asegurar que no exceda 26 caracteres (límite real de Transbank)
+            if len(buy_order) > 26:
+                # Si excede, truncar timestamp pero mantener unicidad
+                max_timestamp_length = 26 - len(f"ORD-{order.id}-")
+                if max_timestamp_length > 0:
+                    timestamp_compact = timestamp_compact[:max_timestamp_length]
+                    buy_order = f"ORD-{order.id}-{timestamp_compact}"
+                else:
+                    # Si order_id es muy grande, usar formato más corto
+                    buy_order = f"O{order.id}-{timestamp_compact[:15]}"
+                    if len(buy_order) > 26:
+                        buy_order = buy_order[:26]
+            
+            # Verificar si hay buy_orders duplicados y generar contador si es necesario
+            logger.info(f"[WEBPAY] Verificando buy_orders duplicados antes de crear...")
+            duplicate_counter = 0
+            max_attempts = 10  # Límite de intentos para evitar loop infinito
+            
+            for attempt in range(max_attempts):
+                try:
+                    from django.db import connection
+                    # Verificar si el buy_order ya existe
+                    with connection.cursor() as cursor:
+                        cursor.execute("""
+                            SELECT COUNT(*) 
+                            FROM payment_transactions 
+                            WHERE webpay_buy_order = %s
+                        """, [buy_order])
+                        count = cursor.fetchone()[0]
+                        
+                        if count == 0:
+                            # buy_order único encontrado
+                            logger.info(f"[WEBPAY] buy_order único generado: '{buy_order}'")
+                            break
+                        else:
+                            # Duplicado encontrado, generar nuevo con contador
+                            duplicate_counter += 1
+                            logger.warning(
+                                f"[WEBPAY] ADVERTENCIA: buy_order duplicado encontrado: '{buy_order}' "
+                                f"(intento {attempt + 1}/{max_attempts})"
+                            )
+                            # Agregar contador al final (respetando límite de 26 caracteres)
+                            buy_order = f"ORD-{order.id}-{timestamp_compact}-{duplicate_counter}"
+                            
+                            if len(buy_order) > 26:
+                                # Si excede 26 caracteres, truncar timestamp pero mantener contador
+                                max_base_length = 26 - len(str(duplicate_counter)) - 1  # -1 para el guión
+                                base = f"ORD-{order.id}-"
+                                remaining = max_base_length - len(base)
+                                if remaining > 0:
+                                    truncated_timestamp = timestamp_compact[:remaining]
+                                    buy_order = f"{base}{truncated_timestamp}-{duplicate_counter}"
+                                else:
+                                    # Si aún es muy largo, usar formato más corto
+                                    buy_order = f"O{order.id}-{timestamp_compact[:10]}-{duplicate_counter}"
+                                    if len(buy_order) > 26:
+                                        buy_order = buy_order[:26]
+                                logger.warning(f"[WEBPAY] buy_order truncado por longitud: '{buy_order}'")
+                            
+                            if attempt == max_attempts - 1:
+                                # Último intento falló
+                                error_msg = f"No se pudo generar buy_order único después de {max_attempts} intentos"
+                                logger.error(f"[WEBPAY] ERROR: {error_msg}")
+                                return False, error_msg, None
+                except Exception as e:
+                    logger.error(f"[WEBPAY] ERROR al verificar buy_orders duplicados: {type(e).__name__}: {str(e)}")
+                    logger.error(f"[WEBPAY] Traceback:", exc_info=True)
+                    # Continuar con el buy_order generado - el índice único en BD lo protegerá
+                    break
+            
+            # Asegurar que no exceda 26 caracteres (límite real de Transbank - verificación final)
+            if len(buy_order) > 26:
+                buy_order = buy_order[:26]
+                logger.warning(f"[WEBPAY] buy_order truncado a 26 caracteres: '{buy_order}'")
+            
+            if duplicate_counter > 0:
+                logger.info(f"[WEBPAY] buy_order generado con contador después de {duplicate_counter} duplicados encontrados")
             
             # Session ID (máximo 64 caracteres)
             session_id = f"SESSION-{order.id}"
@@ -445,8 +511,8 @@ class WebpayService:
             logger.info(f"[WEBPAY]   - return_url: '{return_url}' (tipo: {type(return_url).__name__})")
             
             # Validaciones adicionales
-            if not buy_order or len(buy_order) > 64:
-                error_msg = f"buy_order inválido: '{buy_order}' (debe tener máximo 64 caracteres)"
+            if not buy_order or len(buy_order) > 26:
+                error_msg = f"buy_order inválido: '{buy_order}' (debe tener máximo 26 caracteres según Transbank)"
                 logger.error(f"[WEBPAY] ERROR: {error_msg}")
                 return False, error_msg, None
             

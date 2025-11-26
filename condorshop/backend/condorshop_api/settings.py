@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.postgres',  # Soporte para funcionalidades avanzadas de PostgreSQL
     # Third party
     'rest_framework',
     'rest_framework_simplejwt',
@@ -104,6 +105,7 @@ DATABASES = {
         'OPTIONS': {
             'connect_timeout': 10,  # Timeout de conexión en segundos
             'options': '-c statement_timeout=30000',  # Timeout de queries: 30 segundos
+            'sslmode': 'require',  # Requerido para Supabase (conexiones SSL)
         },
     }
 }
