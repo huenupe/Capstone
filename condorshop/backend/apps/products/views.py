@@ -4,6 +4,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
+from django.views.decorators.cache import cache_page
+from django.utils.decorators import method_decorator
+from django.core.cache import cache
 from apps.common.utils import format_clp
 from .models import Product, Category, ProductPriceHistory
 from .serializers import (
@@ -20,6 +23,9 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
     ViewSet para productos
     - GET /api/products/ - Listado con búsqueda, filtros y ordenamiento
     - GET /api/products/{slug}/ - Detalle por slug
+    
+    Optimización: Endpoint list cacheado por 5 minutos para mejorar LCP.
+    Caché se invalida automáticamente cuando se crean/actualizan/eliminan productos.
     """
     queryset = Product.objects.filter(active=True).select_related('category').prefetch_related('images')
     permission_classes = [IsAuthenticatedOrReadOnly]
@@ -28,6 +34,14 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['price', 'created_at']
     ordering = ['-created_at']
     lookup_field = 'slug'
+    
+    @method_decorator(cache_page(300))  # Cachear 5 minutos (300 segundos)
+    def list(self, request, *args, **kwargs):
+        """
+        Listado de productos cacheado para mejorar rendimiento.
+        Caché se invalida automáticamente cuando hay cambios en productos.
+        """
+        return super().list(request, *args, **kwargs)
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -87,10 +101,21 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     ViewSet para categorías
     GET /api/products/categories/ - Listado de categorías con jerarquía
     GET /api/products/categories/{id}/ - Detalle de categoría con subcategorías
+    
+    Optimización: Endpoint list cacheado por 15 minutos ya que categorías cambian raramente.
+    Caché se invalida automáticamente cuando se crean/actualizan/eliminan categorías.
     """
     queryset = Category.objects.select_related('parent_category').prefetch_related('subcategories')
     serializer_class = CategorySerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+    
+    @method_decorator(cache_page(900))  # Cachear 15 minutos (900 segundos) - categorías cambian raramente
+    def list(self, request, *args, **kwargs):
+        """
+        Listado de categorías cacheado para mejorar rendimiento.
+        Caché se invalida automáticamente cuando hay cambios en categorías.
+        """
+        return super().list(request, *args, **kwargs)
     
     def get_queryset(self):
         """Optimizar queries con jerarquía"""

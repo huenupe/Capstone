@@ -128,8 +128,11 @@ const HeroCarousel = () => {
             src={slide.image_url}
             alt={slide.alt_text || slide.name || 'Slide del carrusel'}
             className="w-full h-full object-cover object-center"
+            width={1920}
+            height={600}
             onError={handleImageError}
             loading={index === 0 ? 'eager' : 'lazy'}
+            fetchpriority={index === 0 ? 'high' : 'low'}
           />
           {/* Placeholder gradient if image fails to load */}
           <div 

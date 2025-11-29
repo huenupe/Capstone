@@ -54,44 +54,65 @@ apiClient.interceptors.response.use(
     return response
   },
   (error) => {
-    // Si recibimos 401, limpiar sesión
-    if (error.response?.status === 401) {
-      const { logout } = useAuthStore.getState()
-      authToken.remove()
-      logout()
-      
-      // Rutas públicas que NO deben redirigir a login (permiten checkout de invitados)
-      const publicRoutes = [
-        '/',
-        '/cart',
-        '/checkout/customer',
-        '/checkout/address',
-        '/checkout/payment',
-        '/checkout/review',
-        '/login',
-        '/register',
-        '/forgot-password',
-        '/reset-password',
-      ]
-      
-      // Rutas de productos y categorías (públicas)
-      const isPublicRoute = publicRoutes.some(route => 
-        window.location.pathname === route || 
-        window.location.pathname.startsWith('/product/') ||
-        window.location.pathname.startsWith('/category/')
-      )
-      
-      // Solo redirigir a login si:
-      // 1. No estamos ya en login
-      // 2. NO estamos en una ruta pública (para permitir checkout de invitados)
-      // 3. NO estamos en una ruta de checkout o carrito
-      if (window.location.pathname !== '/login' && !isPublicRoute) {
-        window.location.href = '/login'
-      }
+    // Si no hay error.response o el status no es 401, rechazar directamente
+    if (!error.response || error.response.status !== 401) {
+      return Promise.reject(error)
     }
+
+    const url = error.config?.url || ''
+
+    const protectedApiPrefixes = [
+      '/users/profile',
+      '/users/update-profile',
+      '/users/delete-account',
+      '/users/address',
+      '/orders/',
+      '/payments/',
+    ]
+
+    const isProtectedApi = protectedApiPrefixes.some((prefix) =>
+      url.includes(prefix)
+    )
+
+    // Si el 401 viene de un endpoint NO protegido, no tumbes la sesión global
+    if (!isProtectedApi) {
+      return Promise.reject(error)
+    }
+
+    // Aquí sí: endpoint protegido → cerrar sesión
+    const { logout } = useAuthStore.getState()
+    authToken.remove()
+    logout()
+
+    // Rutas públicas que NO deben redirigir a login (permiten checkout de invitados)
+    const publicRoutes = [
+      '/',
+      '/cart',
+      '/checkout/customer',
+      '/checkout/address',
+      '/checkout/payment',
+      '/checkout/review',
+      '/login',
+      '/register',
+      '/forgot-password',
+      '/reset-password',
+    ]
     
-    // Mantener todos los errores visibles para debugging
-    // Los errores son útiles para identificar problemas y entender el proyecto
+    // Rutas de productos y categorías (públicas)
+    const isPublicRoute = publicRoutes.some(route => 
+      window.location.pathname === route || 
+      window.location.pathname.startsWith('/product/') ||
+      window.location.pathname.startsWith('/category/')
+    )
+    
+    // Solo redirigir a login si:
+    // 1. No estamos ya en login
+    // 2. NO estamos en una ruta pública (para permitir checkout de invitados)
+    // 3. NO estamos en una ruta de checkout o carrito
+    if (window.location.pathname !== '/login' && !isPublicRoute) {
+      window.location.href = '/login'
+    }
+
     return Promise.reject(error)
   }
 )

@@ -1,5 +1,9 @@
 # Generated manually for refactoring - Acción 2 según plan original
 # MIGRACIÓN SEGURA con verificaciones condicionales y SQL directo
+#
+# IMPORTANTE: Esta migración incluye operaciones explícitas de Django (AddField, RemoveField)
+# además de RunPython para actualizar tanto la BD como el estado interno del modelo de Django.
+# Sin estas operaciones explícitas, Django seguiría pensando que existen los campos antiguos.
 from django.db import migrations, models, connection
 import django.db.models.deletion
 
@@ -590,10 +594,123 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # Paso 1: Agregar columnas nuevas
+        # Paso 1: Agregar columnas nuevas en BD
         migrations.RunPython(
             add_columns_safely,
             reverse_code=migrations.RunPython.noop
+        ),
+        
+        # Paso 1b: Actualizar estado del modelo de Django - Agregar campos nuevos
+        migrations.AddField(
+            model_name='paymenttransaction',
+            name='order',
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name='payment_transactions',
+                to='orders.order',
+                db_column='order_id',
+                verbose_name='Pedido'
+            ),
+        ),
+        migrations.AddField(
+            model_name='paymenttransaction',
+            name='payment_method',
+            field=models.CharField(
+                choices=[('webpay', 'Webpay (Tarjeta)'), ('transfer', 'Transferencia Bancaria'), ('cash', 'Efectivo (Retiro en tienda)')],
+                default='webpay',
+                max_length=20,
+                db_column='payment_method',
+                verbose_name='Método de pago'
+            ),
+        ),
+        migrations.AddField(
+            model_name='paymenttransaction',
+            name='currency',
+            field=models.CharField(
+                default='CLP',
+                max_length=3,
+                db_column='currency',
+                verbose_name='Moneda'
+            ),
+        ),
+        migrations.AddField(
+            model_name='paymenttransaction',
+            name='webpay_token',
+            field=models.CharField(
+                blank=True,
+                null=True,
+                unique=True,
+                max_length=255,
+                db_column='webpay_token',
+                verbose_name='Token Webpay'
+            ),
+        ),
+        migrations.AddField(
+            model_name='paymenttransaction',
+            name='webpay_buy_order',
+            field=models.CharField(
+                blank=True,
+                null=True,
+                max_length=255,
+                db_column='webpay_buy_order',
+                verbose_name='Orden de compra Webpay'
+            ),
+        ),
+        migrations.AddField(
+            model_name='paymenttransaction',
+            name='webpay_authorization_code',
+            field=models.CharField(
+                blank=True,
+                null=True,
+                max_length=50,
+                db_column='webpay_authorization_code',
+                verbose_name='Código de autorización'
+            ),
+        ),
+        migrations.AddField(
+            model_name='paymenttransaction',
+            name='webpay_transaction_date',
+            field=models.DateTimeField(
+                blank=True,
+                null=True,
+                db_column='webpay_transaction_date',
+                verbose_name='Fecha de transacción'
+            ),
+        ),
+        migrations.AddField(
+            model_name='paymenttransaction',
+            name='card_last_four',
+            field=models.CharField(
+                blank=True,
+                null=True,
+                max_length=4,
+                db_column='card_last_four',
+                verbose_name='Últimos 4 dígitos'
+            ),
+        ),
+        migrations.AddField(
+            model_name='paymenttransaction',
+            name='card_brand',
+            field=models.CharField(
+                blank=True,
+                null=True,
+                max_length=20,
+                db_column='card_brand',
+                help_text='visa, mastercard, etc',
+                verbose_name='Marca de tarjeta'
+            ),
+        ),
+        migrations.AddField(
+            model_name='paymenttransaction',
+            name='gateway_response',
+            field=models.JSONField(
+                blank=True,
+                null=True,
+                db_column='gateway_response',
+                verbose_name='Respuesta del gateway'
+            ),
         ),
         
         # Paso 2: Migrar datos usando SQL directo
@@ -627,7 +744,41 @@ class Migration(migrations.Migration):
             ),
         ),
         
-        # Paso 5: Eliminar campos antiguos
+        # Paso 4b: Actualizar estado del modelo de Django - Remover campos antiguos
+        migrations.RemoveField(
+            model_name='paymenttransaction',
+            name='payment',
+        ),
+        migrations.RemoveField(
+            model_name='paymenttransaction',
+            name='authorization_code',
+        ),
+        migrations.RemoveField(
+            model_name='paymenttransaction',
+            name='buy_order',
+        ),
+        migrations.RemoveField(
+            model_name='paymenttransaction',
+            name='tbk_token',
+        ),
+        migrations.RemoveField(
+            model_name='paymenttransaction',
+            name='session_id',
+        ),
+        migrations.RemoveField(
+            model_name='paymenttransaction',
+            name='response_code',
+        ),
+        migrations.RemoveField(
+            model_name='paymenttransaction',
+            name='processed_at',
+        ),
+        migrations.RemoveField(
+            model_name='paymenttransaction',
+            name='card_detail',
+        ),
+        
+        # Paso 5: Eliminar campos antiguos en BD
         migrations.RunPython(
             remove_old_fields_safely,
             reverse_code=migrations.RunPython.noop

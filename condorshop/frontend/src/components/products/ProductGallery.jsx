@@ -13,6 +13,9 @@ const ProductGallery = ({ images = [], productName = '' }) => {
           src={displayImages[selectedIndex]?.image || '/placeholder-product.jpg'}
           alt={productName}
           className="w-full h-full object-contain"
+          loading="eager"
+          width={600}
+          height={600}
           onError={(e) => {
             e.target.src = '/placeholder-product.jpg'
           }}
@@ -36,6 +39,9 @@ const ProductGallery = ({ images = [], productName = '' }) => {
                 src={img.image}
                 alt={`${productName} - Vista ${index + 1}`}
                 className="w-full h-full object-cover"
+                loading="lazy"
+                width={150}
+                height={150}
                 onError={(e) => {
                   e.target.src = '/placeholder-product.jpg'
                 }}

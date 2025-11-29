@@ -33,66 +33,60 @@ const migrateCartState = (state) => {
   return { items, subtotal, shipping, total }
 }
 
+// Helper function para calcular valores derivados
+const calculateDerivedValues = (items) => {
+  const parseNumber = (value) => {
+    if (value === null || value === undefined) return 0
+    if (typeof value === 'number') return value
+    if (typeof value === 'string') {
+      const parsed = parseFloat(value)
+      return isNaN(parsed) ? 0 : parsed
+    }
+    return 0
+  }
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return { subtotal: 0, shipping: 0, total: 0, totalDiscount: 0 }
+  }
+
+  const subtotal = items.reduce((sum, item) => {
+    const price = parseNumber(item.unit_price)
+    const qty = parseNumber(item.quantity)
+    return sum + (price * qty)
+  }, 0)
+
+  const totalDiscount = items.reduce((sum, item) => {
+    const originalPrice = parseNumber(item.product?.price || item.unit_price)
+    const discountedPrice = parseNumber(item.unit_price)
+    const qty = parseNumber(item.quantity)
+    if (originalPrice > discountedPrice) {
+      return sum + ((originalPrice - discountedPrice) * qty)
+    }
+    return sum
+  }, 0)
+
+  const shipping = calculateShipping(subtotal)
+  const total = subtotal + shipping
+
+  return { subtotal, shipping, total, totalDiscount }
+}
+
 export const useCartStore = create(
   persist(
     (set, get) => ({
       items: [],
+      // Valores derivados calculados automáticamente (NO se persisten en localStorage)
+      // Se recalcularán cada vez que cambien los items
       subtotal: 0,
       shipping: 0,
       total: 0,
       totalDiscount: 0,
 
+      // Calcular valores derivados automáticamente basados en items
       updateTotals: () => {
-        try {
-          const { items } = get()
-          if (!Array.isArray(items)) {
-            set({ items: [], subtotal: 0, shipping: 0, total: 0, totalDiscount: 0 })
-            return
-          }
-
-          // Función para parsear números (Django Decimal puede venir como string)
-          const parseNumber = (value) => {
-            if (value === null || value === undefined) return 0
-            if (typeof value === 'number') return value
-            if (typeof value === 'string') {
-              const parsed = parseFloat(value)
-              return isNaN(parsed) ? 0 : parsed
-            }
-            return 0
-          }
-
-          const subtotal = items.reduce(
-            (sum, item) => {
-              const price = parseNumber(item.unit_price)
-              const qty = parseNumber(item.quantity)
-              const itemSubtotal = price * qty
-              return sum + itemSubtotal
-            },
-            0
-          )
-          
-          // Calcular descuento total (diferencia entre precio original y precio con descuento)
-          const totalDiscount = items.reduce(
-            (sum, item) => {
-              const originalPrice = parseNumber(item.product?.price || item.unit_price)
-              const discountedPrice = parseNumber(item.unit_price)
-              const qty = parseNumber(item.quantity)
-              if (originalPrice > discountedPrice) {
-                return sum + ((originalPrice - discountedPrice) * qty)
-              }
-              return sum
-            },
-            0
-          )
-          
-          const shipping = calculateShipping(subtotal)
-          const total = subtotal + shipping
-
-          set({ subtotal, shipping, total, totalDiscount })
-        } catch (error) {
-          console.error('Error in updateTotals:', error)
-          set({ items: [], subtotal: 0, shipping: 0, total: 0, totalDiscount: 0 })
-        }
+        const { items } = get()
+        const derived = calculateDerivedValues(items)
+        set(derived)
       },
 
       setCart: (cartData) => {
@@ -110,57 +104,9 @@ export const useCartStore = create(
             return 0
           }
           
-          // Calcular subtotal desde items (siempre calcular desde items para asegurar precisión)
-          let subtotal = 0
-          if (items.length > 0) {
-            subtotal = items.reduce(
-              (sum, item) => {
-                const price = parseNumber(item.unit_price)
-                const qty = parseNumber(item.quantity)
-                const itemSubtotal = price * qty
-                return sum + itemSubtotal
-              },
-              0
-            )
-          } else if (cartData?.subtotal !== null && cartData?.subtotal !== undefined) {
-            // Solo usar subtotal del backend si no hay items
-            subtotal = parseNumber(cartData.subtotal)
-          }
-          
-          // Calcular descuento total
-          let totalDiscount = 0
-          if (items.length > 0) {
-            totalDiscount = items.reduce(
-              (sum, item) => {
-                const originalPrice = parseNumber(item.product?.price || item.unit_price)
-                const discountedPrice = parseNumber(item.unit_price)
-                const qty = parseNumber(item.quantity)
-                if (originalPrice > discountedPrice) {
-                  return sum + ((originalPrice - discountedPrice) * qty)
-                }
-                return sum
-              },
-              0
-            )
-          }
-          
-          // Usar shipping_cost del backend si está disponible, sino calcularlo
-          let shipping = 0
-          if (cartData?.shipping_cost !== null && cartData?.shipping_cost !== undefined) {
-            shipping = parseNumber(cartData.shipping_cost)
-          } else {
-            shipping = calculateShipping(subtotal)
-          }
-          
-          // Usar total del backend si está disponible, sino calcularlo
-          let total = 0
-          if (cartData?.total !== null && cartData?.total !== undefined) {
-            total = parseNumber(cartData.total)
-          } else {
-            total = subtotal + shipping
-          }
-
-          set({ items, subtotal, shipping, total, totalDiscount })
+          // Calcular valores derivados automáticamente
+          const derived = calculateDerivedValues(items)
+          set({ items, ...derived })
         } catch (error) {
           console.error('Error in setCart:', error)
           set({ items: [], subtotal: 0, shipping: 0, total: 0, totalDiscount: 0 })
@@ -191,8 +137,8 @@ export const useCartStore = create(
             newItems = [...safeItems, item]
           }
 
-          set({ items: newItems })
-          get().updateTotals()
+          const derived = calculateDerivedValues(newItems)
+          set({ items: newItems, ...derived })
         } catch (error) {
           // Ignorar errores de agregar item
         }
@@ -210,8 +156,8 @@ export const useCartStore = create(
             (item.id === itemId || item.product_id === itemId) ? { ...item, quantity: safeQty } : item
           ).filter(item => item.quantity > 0)
 
-          set({ items: newItems })
-          get().updateTotals()
+          const derived = calculateDerivedValues(newItems)
+          set({ items: newItems, ...derived })
         } catch (error) {
           // Ignorar errores de actualización
         }
@@ -227,8 +173,8 @@ export const useCartStore = create(
           const newItems = items.filter((item) => 
             (item.id !== itemId && item.product_id !== itemId)
           )
-          set({ items: newItems })
-          get().updateTotals()
+          const derived = calculateDerivedValues(newItems)
+          set({ items: newItems, ...derived })
         } catch (error) {
           // Ignorar errores de remoción
         }
@@ -264,8 +210,15 @@ export const useCartStore = create(
     }),
     {
       name: 'cart-storage',
+      // Solo persistir 'items' - los valores calculados (subtotal, shipping, total, totalDiscount) 
+      // NO se guardan para reducir tamaño de localStorage y mejor rendimiento
+      partialize: (state) => ({ items: state.items }),
       migrate: (persistedState) => {
-        return migrateCartState(persistedState)
+        const migrated = migrateCartState(persistedState)
+        // Solo retornar items - los valores derivados se calcularán automáticamente
+        const items = migrated.items || []
+        const derived = calculateDerivedValues(items)
+        return { items, ...derived }
       },
     }
   )

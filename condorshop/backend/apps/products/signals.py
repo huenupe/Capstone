@@ -1,10 +1,13 @@
 """
-Signals para capturar cambios de precio automáticamente en ProductPriceHistory.
+Signals para capturar cambios de precio automáticamente en ProductPriceHistory
+y invalidar caché cuando cambian productos o categorías.
 """
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save, pre_save, post_delete
 from django.dispatch import receiver
 from django.utils import timezone
-from .models import Product, ProductPriceHistory
+from django.core.cache import cache
+from django.core.cache.utils import make_template_fragment_key
+from .models import Product, ProductPriceHistory, Category
 
 
 @receiver(pre_save, sender=Product)
@@ -80,4 +83,85 @@ def create_price_history(sender, instance, created, **kwargs):
             effective_from=now,
             effective_to=None  # Precio actual
         )
+    
+    # Invalidar caché de productos después de crear/actualizar
+    _invalidate_product_cache()
+
+
+@receiver(post_delete, sender=Product)
+def invalidate_cache_on_product_delete(sender, instance, **kwargs):
+    """Invalidar caché cuando se elimina un producto"""
+    _invalidate_product_cache()
+
+
+def _invalidate_product_cache():
+    """
+    Invalida todas las claves de caché relacionadas con productos.
+    El decorator @cache_page de Django crea claves basadas en la URL completa,
+    por lo que necesitamos usar un patrón para invalidar todas las variaciones.
+    """
+    # Invalidar caché específica de productos
+    cache.delete_many([
+        'products_list',
+        'products_active_list',
+    ])
+    
+    # Invalidar caché de páginas (cache_page usa claves como:
+    # 'views.decorators.cache.cache_page..GET.abc123...')
+    # Como no podemos predecir todas las variaciones, usamos un método más directo:
+    # Limpiar por patrón si usamos Redis (mejor rendimiento)
+    try:
+        from django_redis import get_redis_connection
+        redis_conn = get_redis_connection("default")
+        # Buscar y eliminar todas las claves que empiecen con 'condorshop:views.decorators.cache.cache_page'
+        pattern = 'condorshop:views.decorators.cache.cache_page.*/api/products*'
+        keys = redis_conn.keys(pattern)
+        if keys:
+            redis_conn.delete(*keys)
+    except Exception:
+        # Si no hay Redis o falla, invalidar caché completo solo de productos
+        # Usar un enfoque más conservador: limpiar solo las claves conocidas
+        pass
+
+
+@receiver(post_save, sender=Category)
+def invalidate_cache_on_category_change(sender, instance, **kwargs):
+    """Invalidar caché cuando se crea/actualiza una categoría"""
+    cache.delete_many([
+        'categories_list',
+        'products_list',  # También invalidar productos ya que pueden filtrarse por categoría
+        'products_active_list',
+    ])
+    
+    # Invalidar caché de páginas de categorías
+    try:
+        from django_redis import get_redis_connection
+        redis_conn = get_redis_connection("default")
+        pattern = 'condorshop:views.decorators.cache.cache_page.*/api/products/categories*'
+        keys = redis_conn.keys(pattern)
+        if keys:
+            redis_conn.delete(*keys)
+    except Exception:
+        pass
+
+
+@receiver(post_delete, sender=Category)
+def invalidate_cache_on_category_delete(sender, instance, **kwargs):
+    """Invalidar caché cuando se elimina una categoría"""
+    cache.delete_many([
+        'categories_list',
+        'products_list',
+        'products_active_list',
+    ])
+    
+    # Invalidar caché de páginas de categorías
+    try:
+        from django_redis import get_redis_connection
+        redis_conn = get_redis_connection("default")
+        pattern = 'condorshop:views.decorators.cache.cache_page.*/api/products/categories*'
+        keys = redis_conn.keys(pattern)
+        if keys:
+            redis_conn.delete(*keys)
+    except Exception:
+        pass
 

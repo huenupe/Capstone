@@ -17,6 +17,9 @@ const ProductCard = ({ product }) => {
           src={imageUrl}
           alt={product.name}
           className="w-full h-48 object-cover"
+          loading="lazy"
+          width={400}
+          height={192}
           onError={(e) => {
             e.target.src = '/placeholder-product.jpg'
           }}

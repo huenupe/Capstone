@@ -367,13 +367,49 @@ class Migration(migrations.Migration):
             ),
         ),
         
-        # 5. Eliminar índices antiguos PRIMERO (usar RunPython para verificar existencia)
+        # 4b) Actualizar estado de Django: eliminar índices antiguos de ShippingRule
+        migrations.RemoveIndex(
+            model_name='shippingrule',
+            name='idx_rule_zone_active',
+        ),
+        migrations.RemoveIndex(
+            model_name='shippingrule',
+            name='idx_rule_type_active',
+        ),
+        migrations.RemoveIndex(
+            model_name='shippingrule',
+            name='idx_rule_priority',
+        ),
+        migrations.RemoveIndex(
+            model_name='shippingrule',
+            name='idx_shiprule_type_product',
+        ),
+        migrations.RemoveIndex(
+            model_name='shippingrule',
+            name='idx_shiprule_type_category',
+        ),
+        
+        # 5) Actualizar estado de Django: eliminar campos antiguos de ShippingRule
+        migrations.RemoveField(
+            model_name='shippingrule',
+            name='category',
+        ),
+        migrations.RemoveField(
+            model_name='shippingrule',
+            name='product',
+        ),
+        migrations.RemoveField(
+            model_name='shippingrule',
+            name='rule_type',
+        ),
+        
+        # 5b. Eliminar índices antiguos en BD con SQL directo (usar RunPython para verificar existencia)
         migrations.RunPython(
             drop_old_indexes_safely,
             reverse_drop_old_indexes
         ),
         
-        # 6. Eliminar campos antiguos de ShippingRule (usar RunPython para verificar existencia y FKs)
+        # 6. Eliminar campos antiguos en BD con SQL directo (usar RunPython para verificar existencia y FKs)
         migrations.RunPython(
             drop_old_columns_safely,
             reverse_drop_old_columns

@@ -158,7 +158,7 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 20,
+    'PAGE_SIZE': 10,  # Reducido de 20 a 10 para mejorar LCP (menor carga inicial)
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',
         'rest_framework.filters.SearchFilter',
@@ -339,17 +339,42 @@ if not os.path.exists(logs_dir):
     os.makedirs(logs_dir)
 
 # Cache Configuration
-# Usar caché en memoria para desarrollo (simple y rápido)
-# En producción, usar Redis o Memcached
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'condorshop-cache',
-        'OPTIONS': {
-            'MAX_ENTRIES': 1000,
-            'CULL_FREQUENCY': 3,  # Eliminar 1/3 de entradas cuando se alcanza MAX_ENTRIES
-        },
-        'TIMEOUT': 300,  # 5 minutos por defecto
+# Configuración dual: LocMem para desarrollo, Redis para producción
+# Mejora significativa el rendimiento de endpoints críticos (productos, categorías)
+REDIS_HOST = env('REDIS_HOST', default='localhost')
+REDIS_PORT = env.int('REDIS_PORT', default=6379)
+REDIS_DB = env.int('REDIS_DB', default=0)
+REDIS_PASSWORD = env('REDIS_PASSWORD', default=None)
+
+if DEBUG:
+    # Desarrollo: usar caché en memoria (no requiere Redis)
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'condorshop-cache',
+            'OPTIONS': {
+                'MAX_ENTRIES': 1000,
+                'CULL_FREQUENCY': 3,  # Eliminar 1/3 de entradas cuando se alcanza MAX_ENTRIES
+            },
+            'TIMEOUT': 300,  # 5 minutos por defecto
+        }
     }
-}
+else:
+    # Producción: usar Redis para mejor rendimiento y persistencia
+    CACHES = {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}',
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+                'PASSWORD': REDIS_PASSWORD,
+                'SOCKET_CONNECT_TIMEOUT': 5,
+                'SOCKET_TIMEOUT': 5,
+                'COMPRESSOR': 'django_redis.compressors.zlib.ZlibCompressor',
+                'IGNORE_EXCEPTIONS': True,  # No fallar si Redis está caído
+            },
+            'KEY_PREFIX': 'condorshop',
+            'TIMEOUT': 300,  # 5 minutos por defecto
+        }
+    }
 

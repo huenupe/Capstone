@@ -91,6 +91,8 @@ class OrderItem(models.Model):
     order = models.ForeignKey(
         Order,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         db_column='order_id',
         related_name='items',
         verbose_name='Pedido'
@@ -148,6 +150,8 @@ class OrderStatusHistory(models.Model):
     order = models.ForeignKey(
         Order,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         db_column='order_id',
         related_name='status_history',
         verbose_name='Pedido'
@@ -301,6 +305,8 @@ class Payment(models.Model):
     order = models.ForeignKey(
         Order,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         db_column='order_id',
         related_name='payments',
         verbose_name='Pedido'
@@ -395,6 +401,8 @@ class PaymentTransaction(models.Model):
     order = models.ForeignKey(
         Order,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         db_column='order_id',
         related_name='payment_transactions',
         verbose_name='Pedido'

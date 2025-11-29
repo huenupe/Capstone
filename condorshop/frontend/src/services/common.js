@@ -1,4 +1,5 @@
 import apiClient from './apiClient'
+import publicApiClient from './publicApiClient'
 
 export const commonService = {
   /**
@@ -8,7 +9,7 @@ export const commonService = {
    */
   getHeroCarouselSlides: async () => {
     try {
-      const response = await apiClient.get('/common/hero-carousel/')
+      const response = await publicApiClient.get('/common/hero-carousel/')
       
       // Validar que la respuesta sea un array
       if (!Array.isArray(response.data)) {
