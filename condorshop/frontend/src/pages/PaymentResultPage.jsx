@@ -164,7 +164,8 @@ const PaymentResultPage = () => {
                 )}
                 
                 {/* Tipo de pago (Débito o Crédito) */}
-                {orderData.transaction_data?.card_brand && (
+                {orderData.transaction_data?.card_brand && 
+                 orderData.transaction_data.card_brand !== 'unknown' && (
                   <div>
                     <p className="text-sm text-gray-500 mb-1">Tipo de Pago</p>
                     <p className="text-lg font-semibold text-gray-900">

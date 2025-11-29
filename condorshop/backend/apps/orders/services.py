@@ -927,13 +927,15 @@ class WebpayService:
                     if card_number:
                         db_transaction.card_last_four = str(card_number)[-4:]
                     # Mapear card_type a formato más legible
-                    card_type = card_detail.get('card_type', 'unknown')
+                    # Solo guardar 'Crédito' o 'Débito', dejar null si no se puede determinar
+                    card_type = card_detail.get('card_type', '').upper()
                     if card_type == 'CR':
                         db_transaction.card_brand = 'Crédito'
                     elif card_type == 'DR':
                         db_transaction.card_brand = 'Débito'
                     else:
-                        db_transaction.card_brand = card_type
+                        # No guardar 'unknown' ni valores no reconocidos, dejar null
+                        db_transaction.card_brand = None
                 
                 db_transaction.save()
                 logger.info(f"[WEBPAY] PaymentTransaction actualizada: ID={db_transaction.id}")

@@ -8,6 +8,7 @@ import { useCheckoutStore } from '../../store/checkoutSlice'
 import { storage } from '../../utils/storage'
 import { formatPrice } from '../../utils/formatPrice'
 import { getProductImage } from '../../utils/getProductImage'
+import webpayBanner from '../../assets/Webpay.png'
 
 const CHECKOUT_STORAGE_KEY = 'checkout_data'
 
@@ -54,10 +55,10 @@ const StepPayment = () => {
               <div className="space-y-4">
                 {/* Webpay Plus */}
                 <div
-                  className={`border rounded-lg p-6 cursor-pointer transition-colors ${
+                  className={`border rounded-lg p-4 md:p-6 cursor-pointer transition-colors ${
                     paymentMethod === 'webpay'
                       ? 'border-primary-600 bg-primary-50'
-                      : 'border-gray-300 hover:border-gray-400'
+                      : 'border-slate-200 bg-white shadow-sm hover:border-gray-400'
                   } ${!webpayEnabled ? 'opacity-60 cursor-not-allowed' : ''}`}
                   onClick={() => webpayEnabled && setPaymentMethod('webpay')}
                   role="radio"
@@ -71,28 +72,37 @@ const StepPayment = () => {
                     }
                   }}
                 >
-                  <div className="flex items-start">
-                    <input
-                      type="radio"
-                      name="paymentMethod"
-                      checked={paymentMethod === 'webpay'}
-                      onChange={() => webpayEnabled && setPaymentMethod('webpay')}
-                      disabled={!webpayEnabled}
-                      className="mt-1"
-                    />
-                    <div className="ml-4 flex-1">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-gray-900">Webpay Plus</h3>
-                        <div className="flex gap-2">
-                          <img src="/webpay-logo.png" alt="Webpay" className="h-6" />
-                        </div>
-                      </div>
-                      <p className="text-sm text-gray-600 mt-2">
+                  {/* Layout responsive: mobile (columna) / desktop (fila) */}
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    {/* Columna izquierda: radio + textos */}
+                    <div className="flex-1">
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="paymentMethod"
+                          checked={paymentMethod === 'webpay'}
+                          onChange={() => webpayEnabled && setPaymentMethod('webpay')}
+                          disabled={!webpayEnabled}
+                          className="flex-shrink-0"
+                        />
+                        <span className="text-lg font-semibold text-gray-900">Webpay Plus</span>
+                      </label>
+                      
+                      <p className="mt-2 text-sm text-slate-700">
                         Tarjetas crédito/débito/prepago. Transacción segura con Transbank.
                       </p>
-                      <p className="text-xs text-gray-500 mt-2">
+                      <p className="mt-1 text-xs text-slate-500">
                         Tus datos de tarjeta se procesan de forma segura por la pasarela; CondorShop no almacena esta información.
                       </p>
+                    </div>
+                    
+                    {/* Columna derecha: banner único de Webpay Plus */}
+                    <div className="mt-2 md:mt-0 flex justify-center md:justify-end flex-shrink-0">
+                      <img
+                        src={webpayBanner}
+                        alt="Webpay Plus - Transbank"
+                        className="h-12 md:h-14 w-auto object-contain"
+                      />
                     </div>
                   </div>
                 </div>
