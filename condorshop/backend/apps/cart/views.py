@@ -187,9 +187,17 @@ def update_cart_item(request, item_id):
             )
 
         cart_item.quantity = quantity
+        cart_item.total_price = cart_item.unit_price * quantity
         cart_item.save()
 
-    response = Response({'message': 'Item actualizado'})
+    # ✅ CORRECCIÓN: Devolver el item actualizado para que el frontend pueda sincronizar
+    from .serializers import CartItemSerializer
+    serializer = CartItemSerializer(cart_item)
+    
+    response = Response({
+        'message': 'Item actualizado',
+        'item': serializer.data
+    })
     if session_token:
         response['X-Session-Token'] = session_token
     

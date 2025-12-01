@@ -6,11 +6,14 @@ import TextField from '../../components/forms/TextField'
 import Spinner from '../../components/common/Spinner'
 import { authService } from '../../services/auth'
 import { useAuthStore } from '../../store/authSlice'
+import { useCartStore } from '../../store/cartSlice'
+import { cartService } from '../../services/cart'
 import { validateEmail } from '../../utils/validations'
 
 const Login = () => {
   const navigate = useNavigate()
   const { login } = useAuthStore()
+  const { setCart } = useCartStore()
   const [loading, setLoading] = useState(false)
   const [emailError, setEmailError] = useState('')
   const [passwordError, setPasswordError] = useState('')
@@ -31,6 +34,17 @@ const Login = () => {
     try {
       const { user, token } = await authService.login(data)
       login(user, token)
+      
+      // ✅ CORRECCIÓN: Sincronizar carrito después de iniciar sesión
+      // Esto asegura que el carrito del usuario autenticado se cargue correctamente
+      // y no se pierdan productos al iniciar sesión
+      try {
+        const cartData = await cartService.getCart()
+        setCart(cartData)
+      } catch (cartError) {
+        // No bloquear el login si hay error al cargar el carrito
+        console.error('Error loading cart after login:', cartError)
+      }
       
       navigate('/')
     } catch (error) {

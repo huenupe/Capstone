@@ -48,30 +48,34 @@ const ProductDetail = () => {
 
     setAddingToCart(true)
     
-    // Mostrar toast inmediatamente (optimistic UI)
-    toast.success('Producto agregado al carrito')
-    
     try {
+      // ✅ CORRECCIÓN: Esperar a que se agregue exitosamente antes de mostrar toast
       await cartService.addToCart({
         product_id: product.id,
         quantity,
       })
 
-      // Refresh cart en background (sin bloquear UI)
-      cartService.getCart().then(cartData => {
+      // Refresh cart y mostrar toast solo después de éxito
+      try {
+        const cartData = await cartService.getCart()
         setCart(cartData)
-      }).catch(err => {
+        // Mostrar toast solo después de que se agregó exitosamente
+        toast.success('Producto agregado al carrito')
+      } catch (err) {
         console.error('Error refreshing cart:', err)
-      })
+        // Aún así mostrar éxito si la adición fue exitosa
+        toast.success('Producto agregado al carrito')
+      }
     } catch (error) {
       // Si falla, mostrar error y recargar carrito para sincronizar
       toast.error(error.response?.data?.error || 'Error al agregar al carrito')
       console.error('Error adding to cart:', error)
-      cartService.getCart().then(cartData => {
+      try {
+        const cartData = await cartService.getCart()
         setCart(cartData)
-      }).catch(err => {
+      } catch (err) {
         console.error('Error refreshing cart after error:', err)
-      })
+      }
     } finally {
       setAddingToCart(false)
     }

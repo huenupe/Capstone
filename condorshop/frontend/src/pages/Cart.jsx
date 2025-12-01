@@ -59,9 +59,23 @@ const Cart = () => {
     loadCart()
   }, [loadCart])
 
+  // ✅ CORRECCIÓN: Sincronizar carrito cuando cambia el estado de autenticación
+  // Esto asegura que al iniciar sesión, el carrito se sincronice correctamente
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Cuando el usuario se autentica, recargar el carrito para sincronizar
+      loadCart()
+    }
+  }, [isAuthenticated, loadCart])
+
   const handleUpdateQuantity = async (itemId, quantity) => {
     if (quantity < 1) {
       handleRemoveItem(itemId)
+      return
+    }
+
+    // Prevenir múltiples peticiones simultáneas para el mismo item
+    if (updating === itemId) {
       return
     }
 
@@ -73,16 +87,20 @@ const Cart = () => {
     setUpdating(itemId)
     updateItemQuantity(itemId, quantity)
     updateTotals()
-    
-    // Mostrar toast inmediatamente
-    showToast('success', 'Cantidad actualizada')
 
     try {
-      // Sincronizar con servidor en background
+      // Sincronizar con servidor - esperar respuesta antes de mostrar toast
       await cartService.updateCartItem(itemId, { quantity })
+      
+      // ✅ CORRECCIÓN: Recargar carrito completo después de actualizar exitosamente
+      // para sincronizar con datos reales del servidor (precios, stock, etc.)
+      await loadCart()
+      
+      // Mostrar toast solo después de que se actualizó exitosamente
+      showToast('success', 'Cantidad actualizada')
     } catch (error) {
       // Revertir cambio en caso de error
-      if (previousQuantity) {
+      if (previousQuantity !== undefined) {
         updateItemQuantity(itemId, previousQuantity)
         updateTotals()
       }

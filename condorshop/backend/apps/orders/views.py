@@ -526,11 +526,40 @@ def list_user_orders(request):
     Listar pedidos del usuario autenticado
     GET /api/orders/
     """
-    orders = Order.objects.filter(user=request.user).select_related(
-        'status'
-    ).prefetch_related('items__product', 'status_history').order_by('-created_at')
+    # ✅ OPTIMIZACIÓN: Prefetch completo de todas las relaciones necesarias
+    # para evitar N+1 queries y mejorar rendimiento significativamente
+    from django.db.models import Prefetch
+    from apps.products.models import ProductImage
     
-    serializer = OrderSerializer(orders, many=True)
+    # Prefetch de productos con categoría e imágenes
+    # El serializer accede a obj.images, así que prefetch normal sin to_attr
+    products_prefetch = Prefetch(
+        'product',
+        queryset=Product.objects.select_related('category').prefetch_related(
+            'images'  # Prefetch normal para que obj.images funcione en el serializer
+        )
+    )
+    
+    # Prefetch de items con producto optimizado y price_snapshot
+    items_prefetch = Prefetch(
+        'items',
+        queryset=OrderItem.objects.select_related('price_snapshot').prefetch_related(products_prefetch)
+    )
+    
+    # Queryset optimizado con todas las relaciones necesarias
+    orders = Order.objects.filter(user=request.user).select_related(
+        'status',
+        'shipping_snapshot'  # ✅ CRÍTICO: Evita N+1 al acceder a shipping_snapshot en serializer
+    ).prefetch_related(
+        items_prefetch,
+        'status_history__status',  # Prefetch status_history con su status
+        'status_history__changed_by'  # Prefetch changed_by para evitar N+1
+    ).order_by('-created_at')[:50]  # ✅ LIMITAR a 50 pedidos más recientes para mejorar rendimiento
+    
+    # Convertir a lista para evaluar el queryset y evitar problemas con slicing
+    orders_list = list(orders)
+    
+    serializer = OrderSerializer(orders_list, many=True)
     return Response(serializer.data)
 
 
