@@ -96,8 +96,17 @@ const Cart = () => {
   }
 
   const handleRemoveItem = async (itemId) => {
+    // Prevenir múltiples peticiones simultáneas para el mismo item
+    if (updating === itemId) {
+      return
+    }
+    
     // Guardar item para revertir en caso de error
     const itemToRemove = items.find(item => item.id === itemId)
+    if (!itemToRemove) {
+      // Item ya no existe, no hacer nada
+      return
+    }
     
     // Optimistic update: eliminar inmediatamente de la UI
     setUpdating(itemId)
@@ -110,13 +119,23 @@ const Cart = () => {
     try {
       // Sincronizar con servidor en background
       await cartService.removeCartItem(itemId)
+      // Si la petición fue exitosa (200 o 204), no necesitamos hacer nada más
+      // El item ya fue eliminado del estado local
     } catch (error) {
-      // Revertir cambio en caso de error - recargar carrito completo
-      if (itemToRemove) {
-        await loadCart()
+      // Si el error es 404, el item ya no existe en el backend
+      // El backend ahora devuelve 200 si ya no existe, pero por compatibilidad
+      // manejamos también 404
+      if (error.response?.status === 404 || error.response?.status === 200) {
+        // El item ya no existe en el backend, mantener el estado actual
+        // No mostrar error ya que la operación fue exitosa
+      } else {
+        // Otro tipo de error - revertir cambio recargando carrito completo
+        if (itemToRemove) {
+          await loadCart()
+        }
+        showToast('error', 'Error al eliminar producto')
+        console.error('Error removing cart item:', error)
       }
-      showToast('error', 'Error al eliminar producto')
-      console.error('Error removing cart item:', error)
     } finally {
       setUpdating(null)
     }

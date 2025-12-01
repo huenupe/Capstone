@@ -57,21 +57,37 @@ def shipping_quote(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    # Build item list for shipping calculation
+    # ✅ OPTIMIZACIÓN: Eliminar patrón N+1 cargando todos los productos en batch
+    # Extraer lista de product_ids válidos antes del loop
+    product_ids = []
+    for item_data in cart_items_data:
+        product_id = item_data.get('product_id')
+        if product_id:
+            product_ids.append(product_id)
+    
+    if not product_ids:
+        return Response({'error': 'No se proporcionaron productos válidos'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Cargar todos los productos de una sola vez con select_related para evitar N+1
+    products = Product.objects.select_related('category').filter(id__in=product_ids)
+    products_map = {p.id: p for p in products}
+    
+    # Build item list for shipping calculation usando el map
     items_for_calc = []
     for item_data in cart_items_data:
         product_id = item_data.get('product_id')
         if not product_id:
             continue
         
-        try:
-            product = Product.objects.select_related('category').get(id=product_id)
-            items_for_calc.append(type('Item', (), {
-                'product_id': product_id,
-                'product': product,
-            })())
-        except Product.DoesNotExist:
+        product = products_map.get(product_id)
+        if not product:
+            # Producto no encontrado - continuar sin agregarlo (mismo comportamiento que antes)
             continue
+        
+        items_for_calc.append(type('Item', (), {
+            'product_id': product_id,
+            'product': product,
+        })())
     
     if len(items_for_calc) != len(cart_items_data):
         return Response({'error': 'Datos de carrito inválidos'}, status=status.HTTP_400_BAD_REQUEST)
@@ -131,26 +147,103 @@ def create_order(request):
     """
     serializer = CreateOrderSerializer(data=request.data)
     if not serializer.is_valid():
+        logger.error(f"Error de validación en create_order: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     # ✅ CORRECCIÓN: Usar get_or_create_cart para manejar múltiples carritos
+    new_session_token = None
     if request.user.is_authenticated:
         cart, _ = Cart.get_or_create_cart(user=request.user)
     else:
         session_token = request.headers.get('X-Session-Token')
         if not session_token:
-            return Response(
-                {'error': 'Token de sesión requerido'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        cart, _ = Cart.get_or_create_cart(session_token=session_token)
+            # Si no hay token de sesión, crear uno nuevo
+            # Esto puede pasar si el usuario nunca agregó productos al carrito del backend
+            logger.warning("Usuario no autenticado sin X-Session-Token en create_order - creando carrito nuevo")
+            cart, created = Cart.get_or_create_cart(session_token=None)  # Esto creará un nuevo token
+            if created and cart.session_token:
+                new_session_token = cart.session_token
+        else:
+            try:
+                cart, _ = Cart.get_or_create_cart(session_token=session_token)
+            except Exception as e:
+                logger.error(f"Error al obtener carrito con session_token: {str(e)}")
+                return Response(
+                    {'error': f'Error al obtener carrito: {str(e)}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
     cart_items_qs = cart.items.select_related('product').all()
     if not cart_items_qs.exists():
-        return Response(
-            {'error': 'El carrito está vacío'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        # Si el carrito está vacío, verificar si hay items en el payload del frontend
+        # Esto puede pasar si el usuario tiene items en localStorage pero no en el backend
+        frontend_items = request.data.get('cart_items', [])
+        if frontend_items and isinstance(frontend_items, list):
+            # Intentar sincronizar items del frontend al backend
+            logger.info(f"Sincronizando {len(frontend_items)} items del frontend al carrito del backend")
+            from apps.cart.models import CartItem
+            
+            # Crear items en el carrito del backend
+            synced_count = 0
+            for item_data in frontend_items:
+                if not isinstance(item_data, dict):
+                    logger.warning(f"Item del frontend no es un dict: {item_data}")
+                    continue
+                    
+                # El frontend puede enviar product_id, product.id, o id
+                product_id = item_data.get('product_id') or item_data.get('id')
+                if not product_id and isinstance(item_data.get('product'), dict):
+                    product_id = item_data.get('product', {}).get('id')
+                
+                quantity = item_data.get('quantity', 1)
+                if not product_id:
+                    logger.warning(f"Item del frontend sin product_id válido: {item_data}")
+                    continue
+                
+                try:
+                    product_id = int(product_id)
+                    quantity = int(quantity)
+                    if quantity <= 0:
+                        logger.warning(f"Cantidad inválida para producto {product_id}: {quantity}")
+                        continue
+                        
+                    product = Product.objects.get(id=product_id, active=True)
+                    unit_price = int(product.final_price)
+                    total_price = unit_price * quantity
+                    
+                    cart_item, created = CartItem.objects.get_or_create(
+                        cart=cart,
+                        product=product,
+                        defaults={
+                            'quantity': quantity,
+                            'unit_price': unit_price,
+                            'total_price': total_price
+                        }
+                    )
+                    if not created:
+                        cart_item.quantity = quantity
+                        cart_item.unit_price = unit_price
+                        cart_item.total_price = total_price
+                        cart_item.save()
+                    
+                    synced_count += 1
+                except (Product.DoesNotExist, ValueError, TypeError) as e:
+                    logger.warning(f"Error al sincronizar item {product_id}: {type(e).__name__}: {str(e)}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Error inesperado al sincronizar item {product_id}: {type(e).__name__}: {str(e)}", exc_info=True)
+                    continue
+            
+            logger.info(f"Sincronizados {synced_count} de {len(frontend_items)} items del frontend")
+            
+            # Recargar items del carrito
+            cart_items_qs = cart.items.select_related('product').all()
+        
+        if not cart_items_qs.exists():
+            return Response(
+                {'error': 'El carrito está vacío. Por favor, agrega productos al carrito antes de crear el pedido.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
     cart_items = list(cart_items_qs)
     item_payloads = []
@@ -173,44 +266,45 @@ def create_order(request):
         )
 
     # ANTES de crear Order, reservar stock
+    # ✅ OPTIMIZACIÓN: Eliminado with transaction.atomic() interno redundante
+    # La función ya tiene @transaction.atomic como decorador, por lo que toda la función está en una transacción
     reserved_products = []  # Para liberar si falla
     
     try:
-        with transaction.atomic():
-            for cart_item in cart_items:
-                product = products_map[cart_item.product_id]
-                
-                # Reservar stock (con validación)
-                try:
-                    product.reserve_stock(
-                        quantity=cart_item.quantity,
-                        reason='Order pending',
-                        reference_id=None  # Se actualizará después de crear Order
-                    )
-                    reserved_products.append((product, cart_item.quantity))
-                except ValidationError as e:
-                    # Liberar reservas anteriores si falla
-                    for prev_product, prev_quantity in reserved_products:
-                        try:
-                            prev_product.release_stock(prev_quantity, reason='Order creation failed')
-                        except Exception:
-                            pass
-                    return Response(
-                        {'error': str(e)},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                
-                unit_price = int(product.final_price)
-                quantity = int(cart_item.quantity)
-                total_price = unit_price * quantity
-                subtotal += total_price
+        for cart_item in cart_items:
+            product = products_map[cart_item.product_id]
+            
+            # Reservar stock (con validación)
+            try:
+                product.reserve_stock(
+                    quantity=cart_item.quantity,
+                    reason='Order pending',
+                    reference_id=None  # Se actualizará después de crear Order
+                )
+                reserved_products.append((product, cart_item.quantity))
+            except ValidationError as e:
+                # Liberar reservas anteriores si falla
+                for prev_product, prev_quantity in reserved_products:
+                    try:
+                        prev_product.release_stock(prev_quantity, reason='Order creation failed')
+                    except Exception:
+                        pass
+                return Response(
+                    {'error': str(e)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            unit_price = int(product.final_price)
+            quantity = int(cart_item.quantity)
+            total_price = unit_price * quantity
+            subtotal += total_price
 
-                item_payloads.append({
-                    'product': product,
-                    'quantity': quantity,
-                    'unit_price': unit_price,
-                    'total_price': total_price,
-                })
+            item_payloads.append({
+                'product': product,
+                'quantity': quantity,
+                'unit_price': unit_price,
+                'total_price': total_price,
+            })
     except Exception as e:
         # Liberar todas las reservas si hay error
         for prev_product, prev_quantity in reserved_products:
@@ -224,11 +318,26 @@ def create_order(request):
         )
 
     shipping_region = serializer.validated_data.get('shipping_region', '')
-    shipping_cost = int(calculate_shipping_cost(subtotal, shipping_region, cart_items))
+    try:
+        shipping_cost = int(calculate_shipping_cost(subtotal, shipping_region, cart_items))
+    except Exception as e:
+        logger.error(f"Error al calcular costo de envío: {type(e).__name__}: {str(e)}", exc_info=True)
+        return Response(
+            {'error': f'Error al calcular costo de envío: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    
     total_amount = subtotal + shipping_cost
 
     # Obtener estado PENDING
-    pending_status = OrderStatus.objects.get(code='PENDING')
+    try:
+        pending_status = OrderStatus.objects.get(code='PENDING')
+    except OrderStatus.DoesNotExist:
+        logger.error("Estado PENDING no encontrado en la base de datos")
+        return Response(
+            {'error': 'Error de configuración: estado PENDING no encontrado'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
     # NUEVO: Crear snapshot de envío antes de crear Order
     from apps.orders.models import OrderShippingSnapshot
@@ -289,15 +398,16 @@ def create_order(request):
     )
 
     # Crear items de la orden con snapshots
+    # ✅ OPTIMIZACIÓN: Crear snapshots en batch con bulk_create en lugar de uno por uno
     from apps.orders.models import OrderItemSnapshot
     
-    order_items = []
+    # Construir lista de snapshots para bulk_create
+    snapshots_to_create = []
     for payload in item_payloads:
         product = payload['product']
-        
-        # Crear snapshot del producto
         product_category_name = product.category.name if product.category else None
-        price_snapshot = OrderItemSnapshot.objects.create(
+        
+        snapshot = OrderItemSnapshot(
             product_name=product.name,
             product_sku=product.sku,
             product_id=product.id,
@@ -306,34 +416,62 @@ def create_order(request):
             product_brand=product.brand,
             product_category_name=product_category_name,
         )
-        
-        # Crear item vinculado al snapshot
+        snapshots_to_create.append(snapshot)
+    
+    # Crear todos los snapshots en una sola operación
+    OrderItemSnapshot.objects.bulk_create(snapshots_to_create)
+    
+    # Ahora crear los OrderItems vinculados a los snapshots
+    # Los snapshots ya tienen IDs asignados por bulk_create
+    order_items = []
+    for payload, snapshot in zip(item_payloads, snapshots_to_create):
+        product = payload['product']
         order_item = OrderItem(
             order=order,
             product=product,
             quantity=payload['quantity'],
             unit_price=payload['unit_price'],
             total_price=payload['total_price'],
-            price_snapshot=price_snapshot,
+            price_snapshot=snapshot,
         )
         order_items.append(order_item)
     
     OrderItem.objects.bulk_create(order_items)
 
-    # Después de crear Order, actualizar reference_id en movimientos de inventario
+    # ✅ OPTIMIZACIÓN: Actualizar movimientos de inventario en batch
+    # Cargar todos los movimientos necesarios en una única query y actualizar con bulk_update
     from apps.products.models import InventoryMovement
-    for item in order_items:
-        try:
-            movements = item.product.inventory_movements.filter(
-                movement_type='reserve',
-                reference_id__isnull=True
-            ).order_by('-created_at')[:1]
-            for movement in movements:
+    
+    # Obtener product_ids de los items creados
+    product_ids = [item.product_id for item in order_items]
+    
+    if product_ids:
+        # Cargar todos los movimientos de reserva sin reference_id para estos productos
+        movements = InventoryMovement.objects.filter(
+            product_id__in=product_ids,
+            movement_type='reserve',
+            reference_id__isnull=True
+        ).order_by('product_id', '-created_at')
+        
+        # Agrupar por producto y elegir el más reciente para cada uno
+        # Esto replica la lógica anterior: order_by('-created_at')[:1] por producto
+        movements_to_update = []
+        seen_products = set()
+        
+        for movement in movements:
+            # Solo tomar el primer movimiento (más reciente) para cada producto
+            if movement.product_id not in seen_products:
                 movement.reference_id = order.id
                 movement.reference_type = 'order'
-                movement.save()
-        except Exception:
-            pass
+                movements_to_update.append(movement)
+                seen_products.add(movement.product_id)
+        
+        # Actualizar todos los movimientos en batch
+        if movements_to_update:
+            InventoryMovement.objects.bulk_update(
+                movements_to_update,
+                ['reference_id', 'reference_type']
+            )
 
     # Registrar historial de estado
     from .models import OrderStatusHistory
@@ -365,8 +503,6 @@ def create_order(request):
             Address.objects.create(**address_data)
         except Exception as e:
             # No fallar la orden si falla guardar la dirección
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f'Error saving address for order {order.id}: {e}')
 
     # Preparar email de confirmación (se enviará cuando se integre Webpay)
@@ -374,7 +510,13 @@ def create_order(request):
     
     # Preparar respuesta
     response_serializer = OrderSerializer(order)
-    return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+    response = Response(response_serializer.data, status=status.HTTP_201_CREATED)
+    
+    # Si se creó un nuevo session_token, incluirlo en los headers para que el frontend lo guarde
+    if new_session_token:
+        response['X-Session-Token'] = new_session_token
+    
+    return response
 
 
 @api_view(['GET'])

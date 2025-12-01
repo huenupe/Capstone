@@ -37,48 +37,53 @@ def add_to_cart(request):
     product_id = serializer.validated_data['product_id']
     quantity = serializer.validated_data['quantity']
 
-    try:
-        product = Product.objects.get(id=product_id, active=True)
-    except Product.DoesNotExist:
-        return Response(
-            {'error': 'Producto no encontrado'},
-            status=status.HTTP_404_NOT_FOUND
-        )
+    # Transacción atómica para evitar condiciones de carrera en el manejo de stock
+    # Usa select_for_update() para bloquear la fila del producto mientras se valida y actualiza
+    with transaction.atomic():
+        try:
+            # Bloquear la fila del producto para prevenir race conditions
+            # Mientras esta transacción está activa, otras operaciones sobre el mismo producto esperarán
+            product = Product.objects.select_for_update().get(id=product_id, active=True)
+        except Product.DoesNotExist:
+            return Response(
+                {'error': 'Producto no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-    # Validar stock
-    if product.stock_qty < quantity:
-        return Response(
-            {'error': f'Stock insuficiente. Disponible: {product.stock_qty}'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    cart, session_token = get_cart(request)
-
-    # Usar final_price (precio con descuento si existe)
-    unit_price = int(product.final_price)
-    
-    # Verificar si el producto ya está en el carrito
-    cart_item, created = CartItem.objects.get_or_create(
-        cart=cart,
-        product=product,
-        defaults={
-            'quantity': quantity,
-            'unit_price': unit_price,
-            'total_price': unit_price * quantity,
-        }
-    )
-
-    if not created:
-        # Actualizar cantidad
-        new_quantity = cart_item.quantity + quantity
-        if product.stock_qty < new_quantity:
+        # Validar stock dentro de la transacción
+        if product.stock_qty < quantity:
             return Response(
                 {'error': f'Stock insuficiente. Disponible: {product.stock_qty}'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        cart_item.quantity = new_quantity
-        cart_item.unit_price = unit_price  # Actualizar precio (puede haber cambiado por descuento)
-        cart_item.save()
+
+        cart, session_token = get_cart(request)
+
+        # Usar final_price (precio con descuento si existe)
+        unit_price = int(product.final_price)
+        
+        # Verificar si el producto ya está en el carrito
+        cart_item, created = CartItem.objects.get_or_create(
+            cart=cart,
+            product=product,
+            defaults={
+                'quantity': quantity,
+                'unit_price': unit_price,
+                'total_price': unit_price * quantity,
+            }
+        )
+
+        if not created:
+            # Actualizar cantidad
+            new_quantity = cart_item.quantity + quantity
+            if product.stock_qty < new_quantity:
+                return Response(
+                    {'error': f'Stock insuficiente. Disponible: {product.stock_qty}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            cart_item.quantity = new_quantity
+            cart_item.unit_price = unit_price  # Actualizar precio (puede haber cambiado por descuento)
+            cart_item.save()
 
     response = Response(
         {'message': 'Producto agregado al carrito', 'cart_id': cart.id},
@@ -107,8 +112,10 @@ def view_cart(request):
         'items__product__images'
     ).get(id=cart.id)
     
-    # Actualizar precios de items si han cambiado (por ejemplo, si se aplicó un descuento)
+    # ✅ OPTIMIZACIÓN: Actualizar precios de items en batch con bulk_update
+    # en lugar de múltiples save() individuales
     with transaction.atomic():
+        items_to_update = []
         for item in cart.items.all():
             if item.product:
                 # Recalcular precio final del producto
@@ -116,7 +123,13 @@ def view_cart(request):
                 # Solo actualizar si el precio cambió (para evitar updates innecesarios)
                 if item.unit_price != new_unit_price:
                     item.unit_price = new_unit_price
-                    item.save(update_fields=['unit_price', 'total_price'])
+                    # Recalcular total_price (se hace automáticamente en save, pero lo hacemos explícito)
+                    item.total_price = item.unit_price * item.quantity
+                    items_to_update.append(item)
+        
+        # Actualizar todos los items que cambiaron en una sola operación
+        if items_to_update:
+            CartItem.objects.bulk_update(items_to_update, ['unit_price', 'total_price'])
     
     serializer = CartSerializer(cart)
     response = Response(serializer.data)
@@ -142,23 +155,39 @@ def update_cart_item(request, item_id):
     quantity = serializer.validated_data['quantity']
     cart, session_token = get_cart(request)
 
-    try:
-        cart_item = CartItem.objects.get(id=item_id, cart=cart)
-    except CartItem.DoesNotExist:
-        return Response(
-            {'error': 'Item no encontrado en el carrito'},
-            status=status.HTTP_404_NOT_FOUND
-        )
+    # Transacción atómica para evitar condiciones de carrera en el manejo de stock
+    # Usa select_for_update() para bloquear tanto el CartItem como el Product relacionado
+    with transaction.atomic():
+        try:
+            # Bloquear la fila del CartItem con el Product relacionado
+            # select_related('product') evita N+1 query
+            cart_item = CartItem.objects.select_related('product').select_for_update().get(
+                id=item_id,
+                cart=cart
+            )
+            # Bloquear explícitamente el Product para asegurar consistencia de stock
+            # Esto previene que otro proceso modifique el stock mientras validamos
+            Product.objects.select_for_update().get(id=cart_item.product.id)
+        except CartItem.DoesNotExist:
+            return Response(
+                {'error': 'Item no encontrado en el carrito'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Product.DoesNotExist:
+            return Response(
+                {'error': 'Producto no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
-    # Validar stock
-    if cart_item.product.stock_qty < quantity:
-        return Response(
-            {'error': f'Stock insuficiente. Disponible: {cart_item.product.stock_qty}'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        # Validar stock dentro de la transacción
+        if cart_item.product.stock_qty < quantity:
+            return Response(
+                {'error': f'Stock insuficiente. Disponible: {cart_item.product.stock_qty}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-    cart_item.quantity = quantity
-    cart_item.save()
+        cart_item.quantity = quantity
+        cart_item.save()
 
     response = Response({'message': 'Item actualizado'})
     if session_token:
@@ -172,17 +201,22 @@ def update_cart_item(request, item_id):
 def remove_cart_item(request, item_id):
     """
     Eliminar item del carrito
-    DELETE /api/cart/items/{id}
+    DELETE /api/cart/items/{id}/delete
     """
     cart, session_token = get_cart(request)
 
     try:
         cart_item = CartItem.objects.get(id=item_id, cart=cart)
         cart_item.delete()
-        return Response({'message': 'Item eliminado'}, status=status.HTTP_204_NO_CONTENT)
+        response = Response({'message': 'Item eliminado'}, status=status.HTTP_204_NO_CONTENT)
+        if session_token:
+            response['X-Session-Token'] = session_token
+        return response
     except CartItem.DoesNotExist:
-        return Response(
-            {'error': 'Item no encontrado'},
-            status=status.HTTP_404_NOT_FOUND
-        )
+        # Si el item ya no existe, considerarlo como éxito (idempotente)
+        # Esto evita errores cuando el frontend hace múltiples peticiones
+        response = Response({'message': 'Item ya eliminado'}, status=status.HTTP_200_OK)
+        if session_token:
+            response['X-Session-Token'] = session_token
+        return response
 

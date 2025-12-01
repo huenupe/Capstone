@@ -55,7 +55,7 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_subtotal(self, obj):
         """Calcula el subtotal sumando todos los items"""
-        return sum(item.subtotal for item in obj.items.all())
+        return sum(item.total_price for item in obj.items.all())
 
     def get_shipping_cost(self, obj):
         """Costo de envío fijo (puede modificarse después)"""

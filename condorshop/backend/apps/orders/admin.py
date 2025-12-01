@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.db.models import Prefetch
 from .models import (
     Order, OrderItem, OrderStatus, OrderStatusHistory,
     Payment, PaymentTransaction, PaymentStatus,
@@ -97,7 +98,12 @@ class PaymentAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         # PaymentTransaction ahora se relaciona con Order, no con Payment
         # Accedemos a través de order.payment_transactions
-        return qs.select_related('order', 'status').prefetch_related('order__payment_transactions')
+        # ✅ CORRECCIÓN: Excluir gateway_response del prefetch para evitar errores de deserialización
+        # cuando hay datos corruptos (dict en lugar de JSON string)
+        payment_transactions_qs = PaymentTransaction.objects.defer('gateway_response')
+        return qs.select_related('order', 'status').prefetch_related(
+            Prefetch('order__payment_transactions', queryset=payment_transactions_qs)
+        )
     
     def status(self, obj):
         return obj.status.code if obj.status else '-'
@@ -117,7 +123,9 @@ class PaymentAdmin(admin.ModelAdmin):
         """Mostrar información de la transacción actual"""
         tx = obj.current_transaction
         if tx:
-            return f"{tx.buy_order} - {tx.status or 'N/A'}"
+            # ✅ CORRECCIÓN: buy_order era el campo antiguo y fue reemplazado por webpay_buy_order
+            # después de la refactorización de Webpay (migración 0008_refactor_payment_transactions_webpay)
+            return f"{tx.webpay_buy_order or 'N/A'} - {tx.status or 'N/A'}"
         return 'Sin transacciones'
     current_transaction_display.short_description = 'Transacción actual'
     
@@ -135,8 +143,10 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         """Optimizar queries con select_related"""
+        # ✅ CORRECCIÓN: Excluir gateway_response para evitar errores de deserialización
+        # cuando hay datos corruptos (dict en lugar de JSON string)
         qs = super().get_queryset(request)
-        return qs.select_related('order')
+        return qs.select_related('order').defer('gateway_response')
     
     def order(self, obj):
         return f"Orden #{obj.order.id}"

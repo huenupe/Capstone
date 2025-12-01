@@ -81,6 +81,11 @@ const StepReview = () => {
         // Guardar dirección si el usuario está autenticado y lo solicitó
         save_address: checkoutData.address.save_address || false,
         address_label: checkoutData.address.save_address ? (checkoutData.address.label || '') : '',
+        // ✅ CORRECCIÓN: Incluir items del carrito para sincronización con backend
+        cart_items: Array.isArray(items) ? items.map(item => ({
+          product_id: item.product_id || item.product?.id || item.id,
+          quantity: item.quantity || 1,
+        })) : [],
       }
 
       const order = await ordersService.createOrder(orderPayload)

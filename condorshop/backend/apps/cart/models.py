@@ -47,46 +47,106 @@ class Cart(models.Model):
         """
         Obtiene o crea un carrito para un usuario o sesión.
         
-        ✅ CORRECCIÓN: Maneja el caso de múltiples carritos activos:
+        ✅ CORRECCIÓN: Maneja race conditions y múltiples carritos activos:
+        - Usa get_or_create de forma atómica para evitar IntegrityError
         - Si hay múltiples carritos activos, usa el más reciente
         - Desactiva los carritos más antiguos para evitar duplicados
         """
+        from django.db import IntegrityError, transaction
+        import uuid
+        
         if user:
-            # Buscar carritos activos para este usuario
+            # Primero verificar si hay múltiples carritos activos y limpiarlos
             active_carts = cls.objects.filter(user=user, is_active=True).order_by('-created_at')
-            
-            if active_carts.exists():
-                # Si hay múltiples, usar el más reciente y desactivar los otros
+            if active_carts.count() > 1:
+                # Desactivar todos excepto el más reciente
                 cart = active_carts.first()
-                if active_carts.count() > 1:
-                    # Desactivar carritos más antiguos (excepto el que estamos usando)
-                    active_carts.exclude(id=cart.id).update(is_active=False)
+                active_carts.exclude(id=cart.id).update(is_active=False)
                 return cart, False
-            else:
-                # No hay carrito activo, crear uno nuevo
-                cart = cls.objects.create(user=user, is_active=True, session_token=None)
-                return cart, True
+            
+            # Usar get_or_create de forma atómica
+            # Buscar primero por user + is_active=True
+            cart = cls.objects.filter(user=user, is_active=True).first()
+            if cart:
+                return cart, False
+            
+            # Si no existe, crear uno nuevo
+            try:
+                cart, created = cls.objects.get_or_create(
+                    user=user,
+                    is_active=True,
+                    defaults={'session_token': None}
+                )
+                return cart, created
+            except IntegrityError:
+                # Race condition: otro proceso creó el carrito, obtenerlo
+                cart = cls.objects.filter(user=user, is_active=True).first()
+                if cart:
+                    return cart, False
+                raise
                 
         elif session_token:
-            # Buscar carrito activo para esta sesión
+            # Primero verificar si hay múltiples carritos activos y limpiarlos
             active_carts = cls.objects.filter(session_token=session_token, is_active=True).order_by('-created_at')
-            
-            if active_carts.exists():
-                # Si hay múltiples, usar el más reciente y desactivar los otros
+            if active_carts.count() > 1:
+                # Desactivar todos excepto el más reciente
                 cart = active_carts.first()
-                if active_carts.count() > 1:
-                    # Desactivar carritos más antiguos (excepto el que estamos usando)
-                    active_carts.exclude(id=cart.id).update(is_active=False)
+                active_carts.exclude(id=cart.id).update(is_active=False)
                 return cart, False
-            else:
-                # No hay carrito activo, crear uno nuevo
-                cart = cls.objects.create(session_token=session_token, is_active=True, user=None)
-                return cart, True
+            
+            # Buscar primero si ya existe un carrito con este token activo
+            cart = cls.objects.filter(session_token=session_token, is_active=True).first()
+            if cart:
+                return cart, False
+            
+            # Verificar si hay un carrito inactivo con este token (reactivarlo)
+            inactive_cart = cls.objects.filter(session_token=session_token, is_active=False).order_by('-created_at').first()
+            if inactive_cart:
+                inactive_cart.is_active = True
+                inactive_cart.save(update_fields=['is_active'])
+                return inactive_cart, False
+            
+            # Si no existe, crear uno nuevo usando get_or_create de forma atómica
+            try:
+                cart, created = cls.objects.get_or_create(
+                    session_token=session_token,
+                    defaults={'is_active': True, 'user': None}
+                )
+                # Si el carrito ya existía pero estaba inactivo, reactivarlo
+                if not created and not cart.is_active:
+                    cart.is_active = True
+                    cart.save(update_fields=['is_active'])
+                return cart, created
+            except IntegrityError:
+                # Race condition: otro proceso creó el carrito, obtenerlo
+                cart = cls.objects.filter(session_token=session_token, is_active=True).first()
+                if cart:
+                    return cart, False
+                # Si no está activo, reactivarlo
+                cart = cls.objects.filter(session_token=session_token).order_by('-created_at').first()
+                if cart:
+                    cart.is_active = True
+                    cart.save(update_fields=['is_active'])
+                    return cart, False
+                raise
         else:
-            # Crear carrito nuevo con token de sesión
-            session_token = str(uuid.uuid4())
-            cart = cls.objects.create(session_token=session_token, is_active=True)
-            return cart, True
+            # Crear carrito nuevo con token de sesión único
+            # Generar token único y crear carrito
+            max_retries = 5
+            for attempt in range(max_retries):
+                new_token = str(uuid.uuid4())
+                try:
+                    cart, created = cls.objects.get_or_create(
+                        session_token=new_token,
+                        is_active=True,
+                        defaults={'user': None}
+                    )
+                    return cart, created
+                except IntegrityError:
+                    # Token duplicado (muy improbable pero posible), generar nuevo
+                    if attempt == max_retries - 1:
+                        raise
+                    continue
 
 
 class CartItem(models.Model):
