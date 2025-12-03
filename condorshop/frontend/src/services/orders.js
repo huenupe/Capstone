@@ -23,18 +23,32 @@ export const ordersService = {
   },
 
   /**
-   * Obtener historial de órdenes del usuario
-   * GET /api/orders/ - Historial del usuario autenticado
+   * Obtener historial de órdenes del usuario con paginación
+   * GET /api/orders/?page=1&page_size=20
+   * @param {Object} params - { page: 1, page_size: 20 }
+   * @returns {Promise<Object>} - { results: [], count, next, previous }
    */
-  getUserOrders: async () => {
+  getUserOrders: async (params = {}) => {
     const { user } = useAuthStore.getState()
     
     if (!user) {
       throw new Error('Usuario no autenticado')
     }
     
-    // Endpoint correcto según backend: /api/orders/
-    const response = await apiClient.get('/orders/')
+    // Endpoint con paginación
+    const queryParams = new URLSearchParams()
+    if (params.page) queryParams.append('page', params.page)
+    if (params.page_size) queryParams.append('page_size', params.page_size)
+    
+    const url = `/orders/${queryParams.toString() ? `?${queryParams.toString()}` : ''}`
+    const response = await apiClient.get(url)
+    
+    // Si la respuesta tiene paginación (count, next, previous), devolverla completa
+    if (response.data.count !== undefined) {
+      return response.data
+    }
+    
+    // Fallback: si no hay paginación, devolver como array
     return Array.isArray(response.data) ? response.data : response.data.results || []
   },
 

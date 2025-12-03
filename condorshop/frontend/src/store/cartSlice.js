@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { cartService } from '../services/cart'
 
 const FREE_SHIPPING_THRESHOLD = 50000
 const SHIPPING_COST = 5000
@@ -81,12 +82,102 @@ export const useCartStore = create(
       shipping: 0,
       total: 0,
       totalDiscount: 0,
+      
+      // Estados de carga y sincronización
+      isLoading: false,
+      fetchInProgress: false,
+      lastFetched: null,
+      error: null,
 
       // Calcular valores derivados automáticamente basados en items
       updateTotals: () => {
         const { items } = get()
         const derived = calculateDerivedValues(items)
         set(derived)
+      },
+      
+      /**
+       * Fetch centralizado del carrito desde la API
+       * Protegido contra múltiples llamadas simultáneas
+       * ✅ MEJORA: Funciona tanto para usuarios autenticados como invitados (guests)
+       * @param {boolean} force - Forzar fetch incluso si ya hay uno en progreso
+       * @returns {Promise<void>}
+       */
+      fetchCart: async (force = false) => {
+        const { fetchInProgress } = get()
+        
+        // Evitar múltiples fetches simultáneos (a menos que se fuerce)
+        if (fetchInProgress && !force) {
+          if (import.meta.env.DEV) {
+            console.log('[cartStore] fetchCart ya en progreso, omitiendo...')
+          }
+          return
+        }
+        
+        set({ fetchInProgress: true, isLoading: true, error: null })
+        
+        try {
+          if (import.meta.env.DEV) {
+            console.time('GET /api/cart/ (store)')
+          }
+          
+          const cartData = await cartService.getCart()
+          
+          if (import.meta.env.DEV) {
+            console.timeEnd('GET /api/cart/ (store)')
+            console.log('[cartStore] Cart fetched:', cartData)
+          }
+          
+          const items = Array.isArray(cartData?.items) ? cartData.items : []
+          
+          // ✅ VALIDACIÓN: Detectar duplicados de id en DEV
+          if (import.meta.env.DEV) {
+            const ids = items.map(i => i.id)
+            const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index)
+            if (duplicates.length > 0) {
+              console.error('[cartStore] ⚠️ DUPLICADOS DETECTADOS en fetchCart:', duplicates)
+              console.log('[cartStore] Items recibidos:', items.map(i => ({ id: i.id, product_id: i.product?.id, product_name: i.product?.name })))
+            } else {
+              console.log('[cartStore] Items ids después de fetch:', ids)
+            }
+          }
+          
+          const derived = calculateDerivedValues(items)
+          
+          set({
+            items,
+            ...derived,
+            lastFetched: Date.now(),
+            error: null,
+          })
+        } catch (error) {
+          console.error('[cartStore] Error fetching cart:', error)
+          
+          // ✅ MEJORA: Solo limpiar si es 401/403 Y hay token (usuario autenticado perdió sesión)
+          const accessToken = localStorage.getItem('accessToken')
+          const status = error.response?.status
+          if ((status === 401 || status === 403) && accessToken) {
+            // Usuario autenticado perdió sesión → limpiar token y carrito
+            localStorage.removeItem('accessToken')
+            get().clearCart()
+            if (import.meta.env.DEV) {
+              console.log('[cartStore] Error 401/403 con token, limpiando carrito y token')
+            }
+          }
+          // Si es guest (sin token) y hay error, mantener carrito local (no limpiar)
+          
+          set({ error: error.response?.data?.error || 'Error al cargar el carrito' })
+          throw error
+        } finally {
+          set({ fetchInProgress: false, isLoading: false })
+        }
+      },
+      
+      /**
+       * Sincronizar carrito con API (alias de fetchCart para claridad semántica)
+       */
+      syncCart: async () => {
+        return get().fetchCart()
       },
 
       setCart: (cartData) => {
@@ -140,7 +231,9 @@ export const useCartStore = create(
           const derived = calculateDerivedValues(newItems)
           set({ items: newItems, ...derived })
         } catch (error) {
-          // Ignorar errores de agregar item
+          if (import.meta.env.DEV) {
+            console.error('[cartStore] Error adding item:', error)
+          }
         }
       },
 
@@ -152,14 +245,64 @@ export const useCartStore = create(
           }
 
           const safeQty = typeof quantity === 'number' && quantity > 0 ? quantity : 0
+          // ✅ CORRECCIÓN: Solo actualizar por item.id (único), NO por product_id
           const newItems = items.map((item) =>
-            (item.id === itemId || item.product_id === itemId) ? { ...item, quantity: safeQty } : item
+            item.id === itemId ? { ...item, quantity: safeQty } : item
           ).filter(item => item.quantity > 0)
 
           const derived = calculateDerivedValues(newItems)
           set({ items: newItems, ...derived })
         } catch (error) {
-          // Ignorar errores de actualización
+          if (import.meta.env.DEV) {
+            console.error('[cartStore] Error updating item quantity:', error)
+          }
+        }
+      },
+
+      /**
+       * Actualizar un item específico con la respuesta del backend
+       * Usa la respuesta del backend para actualizar el item y recalcular totales
+       * ✅ CORRECCIÓN: Solo actualizar por item.id, NO por product_id (evita duplicar items)
+       * @param {Object} updatedItem - Item actualizado del backend
+       */
+      updateItemFromBackend: (updatedItem) => {
+        try {
+          const { items } = get()
+          if (!Array.isArray(items) || !updatedItem || !updatedItem.id) {
+            if (import.meta.env.DEV) {
+              console.warn('[cartStore] updateItemFromBackend: invalid updatedItem', updatedItem)
+            }
+            return
+          }
+
+          // ✅ CORRECCIÓN: Solo actualizar por item.id (único), NO por product_id
+          // Si hay múltiples items del mismo producto, solo actualizamos el que coincide por id
+          const newItems = items.map((item) => {
+            if (item.id === updatedItem.id) {
+              return {
+                ...item,
+                ...updatedItem,
+                // Asegurar que quantity y unit_price sean números
+                quantity: typeof updatedItem.quantity === 'number' ? updatedItem.quantity : parseFloat(updatedItem.quantity) || item.quantity,
+                unit_price: typeof updatedItem.unit_price === 'number' ? updatedItem.unit_price : parseFloat(updatedItem.unit_price) || item.unit_price,
+              }
+            }
+            return item
+          }).filter(item => item.quantity > 0)
+
+          // ✅ VALIDACIÓN: Detectar duplicados de id en DEV
+          if (import.meta.env.DEV) {
+            const ids = newItems.map(i => i.id)
+            const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index)
+            if (duplicates.length > 0) {
+              console.error('[cartStore] ⚠️ DUPLICADOS DETECTADOS después de updateItemFromBackend:', duplicates)
+            }
+          }
+
+          const derived = calculateDerivedValues(newItems)
+          set({ items: newItems, ...derived })
+        } catch (error) {
+          console.error('[cartStore] Error updating item from backend:', error)
         }
       },
 
@@ -170,18 +313,28 @@ export const useCartStore = create(
             return
           }
 
-          const newItems = items.filter((item) => 
-            (item.id !== itemId && item.product_id !== itemId)
-          )
+          // ✅ CORRECCIÓN: Solo eliminar por item.id (único), NO por product_id
+          const newItems = items.filter((item) => item.id !== itemId)
           const derived = calculateDerivedValues(newItems)
           set({ items: newItems, ...derived })
         } catch (error) {
-          // Ignorar errores de remoción
+          if (import.meta.env.DEV) {
+            console.error('[cartStore] Error removing item:', error)
+          }
         }
       },
 
       clearCart: () => {
-        set({ items: [], subtotal: 0, shipping: 0, total: 0, totalDiscount: 0 })
+        // ✅ MEJORA: Resetear completamente el carrito incluyendo estados derivados
+        set({ 
+          items: [], 
+          subtotal: 0, 
+          shipping: 0, 
+          total: 0, 
+          totalDiscount: 0,
+          error: null,
+          lastFetched: null,
+        })
       },
 
       getItemCount: () => {

@@ -116,15 +116,22 @@ def checkout_mode(request):
     saved_addresses = []
     
     if user:
-    # Check legacy address fields
+        # Check legacy address fields
         has_address = bool(user.street and user.city and user.region)
         
-        # Load saved addresses
+        # ✅ OPTIMIZACIÓN: Solo cargar direcciones si existen, y limitar cantidad
         try:
             from apps.users.models import Address
-            addresses = Address.objects.filter(user=user).order_by('-is_default', '-created_at')
             from apps.users.serializers import AddressSerializer
-            saved_addresses = AddressSerializer(addresses, many=True).data
+            
+            # Verificar si hay direcciones guardadas sin cargar todas
+            has_saved_addresses = Address.objects.filter(user=user).exists()
+            saved_addresses = []
+            
+            if has_saved_addresses:
+                # Cargar solo las direcciones necesarias (limitadas a 10 para evitar payload grande)
+                addresses = Address.objects.filter(user=user).order_by('-is_default', '-created_at')[:10]
+                saved_addresses = AddressSerializer(addresses, many=True).data
         except Exception:
             pass  # best-effort if the Address model is unavailable
     
@@ -523,13 +530,22 @@ def create_order(request):
 @permission_classes([IsAuthenticated])
 def list_user_orders(request):
     """
-    Listar pedidos del usuario autenticado
-    GET /api/orders/
+    Listar pedidos del usuario autenticado con paginación
+    GET /api/orders/?page=1&page_size=20
+    
+    ✅ OPTIMIZACIÓN: Prefetch completo de todas las relaciones necesarias
+    para evitar N+1 queries y mejorar rendimiento significativamente.
+    ✅ PAGINACIÓN: Usa PageNumberPagination de DRF para reducir carga inicial.
     """
-    # ✅ OPTIMIZACIÓN: Prefetch completo de todas las relaciones necesarias
-    # para evitar N+1 queries y mejorar rendimiento significativamente
+    import time
+    from django.db import connection
     from django.db.models import Prefetch
     from apps.products.models import ProductImage
+    from django.conf import settings
+    from rest_framework.pagination import PageNumberPagination
+    
+    start_time = time.time()
+    initial_queries = len(connection.queries)
     
     # Prefetch de productos con categoría e imágenes
     # El serializer accede a obj.images, así que prefetch normal sin to_attr
@@ -547,20 +563,46 @@ def list_user_orders(request):
     )
     
     # Queryset optimizado con todas las relaciones necesarias
-    orders = Order.objects.filter(user=request.user).select_related(
+    orders_queryset = Order.objects.filter(user=request.user).select_related(
         'status',
         'shipping_snapshot'  # ✅ CRÍTICO: Evita N+1 al acceder a shipping_snapshot en serializer
     ).prefetch_related(
         items_prefetch,
         'status_history__status',  # Prefetch status_history con su status
         'status_history__changed_by'  # Prefetch changed_by para evitar N+1
-    ).order_by('-created_at')[:50]  # ✅ LIMITAR a 50 pedidos más recientes para mejorar rendimiento
+    ).order_by('-created_at')
     
-    # Convertir a lista para evaluar el queryset y evitar problemas con slicing
-    orders_list = list(orders)
+    # ✅ PAGINACIÓN: Usar PageNumberPagination de DRF
+    paginator = PageNumberPagination()
+    paginator.page_size = int(request.query_params.get('page_size', 20))  # Default 20, máximo 50
+    paginator.page_size_query_param = 'page_size'
+    paginator.max_page_size = 50
     
-    serializer = OrderSerializer(orders_list, many=True)
-    return Response(serializer.data)
+    # Paginar el queryset
+    page = paginator.paginate_queryset(orders_queryset, request)
+    
+    if page is not None:
+        serializer = OrderSerializer(page, many=True)
+        response = paginator.get_paginated_response(serializer.data)
+    else:
+        # Si no hay paginación, devolver todos (fallback)
+        serializer = OrderSerializer(orders_queryset[:50], many=True)
+        response = Response(serializer.data)
+    
+    # ✅ OPTIMIZACIÓN: Logging de performance (solo en desarrollo o si tarda >500ms)
+    duration = time.time() - start_time
+    queries_count = len(connection.queries) - initial_queries
+    queries_time = sum(float(q['time']) for q in connection.queries[initial_queries:])
+    
+    orders_count = len(page) if page is not None else min(50, orders_queryset.count())
+    
+    if duration > 0.5 or settings.DEBUG:
+        logger.info(
+            f"list_user_orders: {duration:.3f}s total, {queries_count} queries, {queries_time:.3f}s queries, "
+            f"orders={orders_count}"
+        )
+    
+    return response
 
 
 @api_view(['GET'])

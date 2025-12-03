@@ -35,6 +35,9 @@ class Cart(models.Model):
         indexes = [
             models.Index(fields=['user'], name='idx_cart_user'),
             models.Index(fields=['session_token'], name='idx_cart_session'),
+            # ✅ OPTIMIZACIÓN: Índices compuestos para queries frecuentes en get_or_create_cart()
+            models.Index(fields=['user', 'is_active'], name='idx_cart_user_active'),
+            models.Index(fields=['session_token', 'is_active'], name='idx_cart_session_active'),
         ]
 
     def __str__(self):
@@ -47,88 +50,138 @@ class Cart(models.Model):
         """
         Obtiene o crea un carrito para un usuario o sesión.
         
-        ✅ CORRECCIÓN: Maneja race conditions y múltiples carritos activos:
-        - Usa get_or_create de forma atómica para evitar IntegrityError
-        - Si hay múltiples carritos activos, usa el más reciente
-        - Desactiva los carritos más antiguos para evitar duplicados
+        ✅ OPTIMIZACIÓN: Reducir tiempo bajo lock y queries:
+        - Minimiza el bloqueo atómico solo a operaciones críticas
+        - Usa select_for_update(nowait=True) para evitar deadlocks
+        - Limpia duplicados solo si existen (evita query innecesaria)
+        - Estrategia: Optimistic locking - solo bloquea si hay duplicados
+        
+        ⚠️ NOTA: select_for_update() es necesario para evitar race conditions
+        cuando múltiples requests concurrentes intentan crear/obtener el mismo carrito.
+        Sin embargo, limitamos su uso solo cuando hay duplicados detectados.
         """
         from django.db import IntegrityError, transaction
+        from django.db.models import F
         import uuid
         
         if user:
-            # Primero verificar si hay múltiples carritos activos y limpiarlos
-            active_carts = cls.objects.filter(user=user, is_active=True).order_by('-created_at')
-            if active_carts.count() > 1:
-                # Desactivar todos excepto el más reciente
-                cart = active_carts.first()
-                active_carts.exclude(id=cart.id).update(is_active=False)
-                return cart, False
+            # ✅ OPTIMIZACIÓN: Primero buscar sin lock (lectura rápida)
+            # Solo aplicar lock si detectamos duplicados
+            cart = cls.objects.filter(user=user, is_active=True).order_by('-created_at').first()
             
-            # Usar get_or_create de forma atómica
-            # Buscar primero por user + is_active=True
-            cart = cls.objects.filter(user=user, is_active=True).first()
             if cart:
+                # ✅ OPTIMIZACIÓN: Solo hacer select_for_update si hay duplicados
+                # Verificar existencia de otros carritos activos sin lock primero
+                has_duplicates = cls.objects.filter(
+                    user=user, 
+                    is_active=True
+                ).exclude(id=cart.id).exists()
+                
+                if has_duplicates:
+                    # Solo aquí aplicamos lock para limpiar duplicados
+                    # Usar nowait=True para evitar deadlocks (si otro proceso tiene lock, falla rápido)
+                    with transaction.atomic():
+                        try:
+                            other_active_carts = cls.objects.filter(
+                                user=user, 
+                                is_active=True
+                            ).exclude(id=cart.id).select_for_update(nowait=True)
+                            
+                            # Actualizar en batch (más eficiente que loop)
+                            other_active_carts.update(is_active=False)
+                        except Exception:
+                            # Si falla el lock (nowait), otro proceso está limpiando
+                            # Simplemente retornar el carrito encontrado (consistencia eventual)
+                            pass
+                
                 return cart, False
             
             # Si no existe, crear uno nuevo
-            try:
-                cart, created = cls.objects.get_or_create(
-                    user=user,
-                    is_active=True,
-                    defaults={'session_token': None}
-                )
-                return cart, created
-            except IntegrityError:
-                # Race condition: otro proceso creó el carrito, obtenerlo
-                cart = cls.objects.filter(user=user, is_active=True).first()
-                if cart:
-                    return cart, False
-                raise
+            # ✅ OPTIMIZACIÓN: Bloqueo atómico solo para creación
+            with transaction.atomic():
+                try:
+                    cart, created = cls.objects.get_or_create(
+                        user=user,
+                        is_active=True,
+                        defaults={'session_token': None}
+                    )
+                    return cart, created
+                except IntegrityError:
+                    # Race condition: otro proceso creó el carrito, obtenerlo
+                    cart = cls.objects.filter(user=user, is_active=True).order_by('-created_at').first()
+                    if cart:
+                        return cart, False
+                    raise
                 
         elif session_token:
-            # Primero verificar si hay múltiples carritos activos y limpiarlos
-            active_carts = cls.objects.filter(session_token=session_token, is_active=True).order_by('-created_at')
-            if active_carts.count() > 1:
-                # Desactivar todos excepto el más reciente
-                cart = active_carts.first()
-                active_carts.exclude(id=cart.id).update(is_active=False)
-                return cart, False
+            # ✅ OPTIMIZACIÓN: Misma estrategia que para user - minimizar locks
+            cart = cls.objects.filter(session_token=session_token, is_active=True).order_by('-created_at').first()
             
-            # Buscar primero si ya existe un carrito con este token activo
-            cart = cls.objects.filter(session_token=session_token, is_active=True).first()
             if cart:
+                # Verificar duplicados sin lock primero
+                has_duplicates = cls.objects.filter(
+                    session_token=session_token,
+                    is_active=True
+                ).exclude(id=cart.id).exists()
+                
+                if has_duplicates:
+                    with transaction.atomic():
+                        try:
+                            other_active_carts = cls.objects.filter(
+                                session_token=session_token,
+                                is_active=True
+                            ).exclude(id=cart.id).select_for_update(nowait=True)
+                            other_active_carts.update(is_active=False)
+                        except Exception:
+                            # Otro proceso está limpiando, continuar
+                            pass
+                
                 return cart, False
             
-            # Verificar si hay un carrito inactivo con este token (reactivarlo)
-            inactive_cart = cls.objects.filter(session_token=session_token, is_active=False).order_by('-created_at').first()
+            # Verificar carrito inactivo (sin lock inicial)
+            inactive_cart = cls.objects.filter(
+                session_token=session_token, 
+                is_active=False
+            ).order_by('-created_at').first()
+            
+            if inactive_cart:
+                # ✅ OPTIMIZACIÓN: Lock solo para reactivación
+                with transaction.atomic():
+                    # Re-verificar con lock para evitar race condition
+                    inactive_cart = cls.objects.filter(
+                        session_token=session_token,
+                        is_active=False
+                    ).select_for_update(nowait=True).order_by('-created_at').first()
+                    
             if inactive_cart:
                 inactive_cart.is_active = True
                 inactive_cart.save(update_fields=['is_active'])
                 return inactive_cart, False
             
-            # Si no existe, crear uno nuevo usando get_or_create de forma atómica
-            try:
-                cart, created = cls.objects.get_or_create(
-                    session_token=session_token,
-                    defaults={'is_active': True, 'user': None}
-                )
-                # Si el carrito ya existía pero estaba inactivo, reactivarlo
-                if not created and not cart.is_active:
-                    cart.is_active = True
-                    cart.save(update_fields=['is_active'])
-                return cart, created
-            except IntegrityError:
-                # Race condition: otro proceso creó el carrito, obtenerlo
-                cart = cls.objects.filter(session_token=session_token, is_active=True).first()
-                if cart:
-                    return cart, False
-                # Si no está activo, reactivarlo
-                cart = cls.objects.filter(session_token=session_token).order_by('-created_at').first()
-                if cart:
-                    cart.is_active = True
-                    cart.save(update_fields=['is_active'])
-                    return cart, False
-                raise
+            # Si no existe, crear uno nuevo
+            with transaction.atomic():
+                try:
+                    cart, created = cls.objects.get_or_create(
+                        session_token=session_token,
+                        defaults={'is_active': True, 'user': None}
+                    )
+                    # Si el carrito ya existía pero estaba inactivo, reactivarlo
+                    if not created and not cart.is_active:
+                        cart.is_active = True
+                        cart.save(update_fields=['is_active'])
+                    return cart, created
+                except IntegrityError:
+                    # Race condition: otro proceso creó el carrito, obtenerlo
+                    cart = cls.objects.filter(session_token=session_token, is_active=True).order_by('-created_at').first()
+                    if cart:
+                        return cart, False
+                    # Si no está activo, reactivarlo
+                    cart = cls.objects.filter(session_token=session_token).order_by('-created_at').first()
+                    if cart:
+                        cart.is_active = True
+                        cart.save(update_fields=['is_active'])
+                        return cart, False
+                    raise
         else:
             # Crear carrito nuevo con token de sesión único
             # Generar token único y crear carrito

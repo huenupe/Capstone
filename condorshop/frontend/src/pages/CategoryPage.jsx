@@ -15,6 +15,14 @@ import { useToast } from '../components/common/Toast'
 const ProductCardWithCart = ({ product, onAddToCart }) => {
   const [quantity, setQuantity] = useState(1)
 
+  const handleAddToCartClick = () => {
+    // ✅ CRÍTICO: Pasar la cantidad ACTUAL del estado, no un valor fijo
+    const currentQuantity = quantity
+    onAddToCart(product, currentQuantity)
+    // ✅ MEJORA: Resetear stepper a 1 después de agregar
+    setQuantity(1)
+  }
+
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition-shadow">
       <Link to={`/product/${product.slug}`} className="block">
@@ -48,7 +56,7 @@ const ProductCardWithCart = ({ product, onAddToCart }) => {
           />
         )}
         <Button
-          onClick={() => onAddToCart(product, quantity)}
+          onClick={handleAddToCartClick}
           disabled={product.stock_qty === 0}
           fullWidth
           className="focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -68,7 +76,6 @@ const CategoryPage = () => {
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [pagination, setPagination] = useState({})
-  const { setCart } = useCartStore()
   const toast = useToast()
   const toastRef = useRef(toast)
 
@@ -225,30 +232,31 @@ const CategoryPage = () => {
       return
     }
 
-    // Mostrar toast inmediatamente (optimistic UI)
-    toast.success('Producto agregado al carrito')
-
     try {
+      // ✅ Enviar cantidad exacta al backend (sin límites artificiales)
       await cartService.addToCart({
         product_id: product.id,
-        quantity,
+        quantity, // Usar la cantidad seleccionada directamente
       })
 
-      // Refresh cart en background (sin bloquear UI)
-      cartService.getCart().then(cartData => {
-        setCart(cartData)
-      }).catch(err => {
-        console.error('Error refreshing cart:', err)
-      })
+      // ✅ MEJORA: Recargar carrito completo desde backend
+      // addToCart() solo devuelve { message, cart_id }, no items
+      const { fetchCart } = useCartStore.getState()
+      await fetchCart()
+      
+      // Mostrar toast de éxito
+      toast.success('Producto agregado al carrito')
     } catch (error) {
-      // Si falla, mostrar error y recargar carrito para sincronizar
-      toast.error(error.response?.data?.error || 'Error al agregar al carrito')
       console.error('Error adding to cart:', error)
-      cartService.getCart().then(cartData => {
-        setCart(cartData)
-      }).catch(err => {
+      toast.error(error.response?.data?.error || 'Error al agregar al carrito')
+      
+      // Recargar carrito para sincronizar con servidor en caso de error
+      try {
+        const { fetchCart } = useCartStore.getState()
+        await fetchCart()
+      } catch (err) {
         console.error('Error refreshing cart after error:', err)
-      })
+      }
     }
   }
 

@@ -3,12 +3,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db.models import Q, Prefetch
 from django.views.decorators.cache import cache_page
 from django.utils.decorators import method_decorator
 from django.core.cache import cache
 from apps.common.utils import format_clp
-from .models import Product, Category, ProductPriceHistory
+from .models import Product, Category, ProductPriceHistory, ProductImage
 from .serializers import (
     ProductListSerializer, 
     ProductDetailSerializer,
@@ -27,7 +27,14 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
     Optimización: Endpoint list cacheado por 5 minutos para mejorar LCP.
     Caché se invalida automáticamente cuando se crean/actualizan/eliminan productos.
     """
-    queryset = Product.objects.filter(active=True).select_related('category').prefetch_related('images')
+    queryset = Product.objects.filter(active=True).select_related('category').prefetch_related(
+        # ✅ OPTIMIZACIÓN: Prefetch imágenes ordenadas por position para evitar queries adicionales
+        Prefetch(
+            'images',
+            queryset=ProductImage.objects.order_by('position'),
+            to_attr='ordered_images'
+        )
+    )
     permission_classes = [IsAuthenticatedOrReadOnly]
     filterset_class = ProductFilter
     search_fields = ['name', 'description']
@@ -105,7 +112,14 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     Optimización: Endpoint list cacheado por 15 minutos ya que categorías cambian raramente.
     Caché se invalida automáticamente cuando se crean/actualizan/eliminan categorías.
     """
-    queryset = Category.objects.select_related('parent_category').prefetch_related('subcategories')
+    queryset = Category.objects.select_related('parent_category').prefetch_related(
+        # ✅ OPTIMIZACIÓN: Prefetch subcategorías activas ordenadas para evitar N+1 queries
+        Prefetch(
+            'subcategories',
+            queryset=Category.objects.filter(active=True).order_by('sort_order', 'name'),
+            to_attr='active_subcategories'
+        )
+    )
     serializer_class = CategorySerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
     

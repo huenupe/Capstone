@@ -51,6 +51,10 @@ class CategorySerializer(serializers.ModelSerializer):
     
     def get_subcategories(self, obj):
         """Obtener subcategorías activas (solo IDs para evitar recursión infinita)"""
+        # ✅ OPTIMIZACIÓN: Usar active_subcategories si está prefetched
+        if hasattr(obj, 'active_subcategories'):
+            return [subcat.id for subcat in obj.active_subcategories]
+        # Fallback por seguridad si no está prefetched
         subcats = obj.subcategories.filter(active=True).order_by('sort_order', 'name')
         return [subcat.id for subcat in subcats]
     
@@ -60,6 +64,10 @@ class CategorySerializer(serializers.ModelSerializer):
     
     def get_has_children(self, obj):
         """Indica si tiene subcategorías activas"""
+        # ✅ OPTIMIZACIÓN: Usar active_subcategories si está prefetched
+        if hasattr(obj, 'active_subcategories'):
+            return len(obj.active_subcategories) > 0
+        # Fallback por seguridad si no está prefetched
         return obj.subcategories.filter(active=True).exists()
     
     def get_depth(self, obj):
@@ -165,7 +173,14 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     def get_main_image(self, obj):
         """Retorna la primera imagen ordenada por position con URL absoluta"""
-        main_img = obj.images.order_by('position').first()
+        # ✅ OPTIMIZACIÓN: Usar ordered_images si está prefetched
+        main_img = None
+        if hasattr(obj, 'ordered_images') and obj.ordered_images:
+            main_img = obj.ordered_images[0]
+        else:
+            # Fallback por seguridad si no está prefetched
+            main_img = obj.images.order_by('position').first()
+        
         if not main_img:
             return None
 

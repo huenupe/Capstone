@@ -1,17 +1,51 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { formatPrice } from '../utils/formatPrice'
 import { getProductImage } from '../utils/getProductImage'
 import Spinner from '../components/common/Spinner'
 import Button from '../components/common/Button'
+import OptimizedImage from '../components/common/OptimizedImage'
 import { ordersService } from '../services/orders'
 import paymentsService from '../services/paymentsService'
+import { useOrdersStore } from '../store/ordersSlice'
 import { useToast } from '../components/common/Toast'
 
+// Skeleton component para mejorar percepción de fluidez
+const OrderSkeleton = () => (
+  <div className="bg-white rounded-lg shadow-md p-6 animate-pulse">
+    <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4">
+      <div className="flex-1">
+        <div className="h-6 bg-gray-200 rounded w-32 mb-2"></div>
+        <div className="h-4 bg-gray-200 rounded w-48"></div>
+      </div>
+      <div className="h-6 bg-gray-200 rounded w-20 mt-2 md:mt-0"></div>
+    </div>
+    <div className="border-t pt-4">
+      <div className="space-y-2 mb-4">
+        {[1, 2].map((i) => (
+          <div key={i} className="flex items-center gap-4">
+            <div className="w-16 h-16 bg-gray-200 rounded"></div>
+            <div className="flex-1">
+              <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+              <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+            </div>
+            <div className="h-4 bg-gray-200 rounded w-20"></div>
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between items-center border-t pt-4">
+        <div className="h-4 bg-gray-200 rounded w-24"></div>
+        <div className="h-6 bg-gray-200 rounded w-32"></div>
+      </div>
+    </div>
+  </div>
+)
+
 const Orders = () => {
-  const [orders, setOrders] = useState([])
-  const [loading, setLoading] = useState(true)
   const [processingOrderId, setProcessingOrderId] = useState(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [retryCount, setRetryCount] = useState(0)
+  const { orders, pagination, isLoadingOrders, errorOrders, fetchOrdersOnce, prefetchedNextPage } = useOrdersStore()
   const toast = useToast()
   const toastRef = useRef(toast)
 
@@ -19,30 +53,37 @@ const Orders = () => {
     toastRef.current = toast
   }, [toast])
 
-  const showToast = useCallback((type, message) => {
-    const current = toastRef.current
-    if (!current || typeof current[type] !== 'function') {
-      return
-    }
-    current[type](message)
-  }, [])
-
-  const loadOrders = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await ordersService.getUserOrders()
-      setOrders(Array.isArray(data) ? data : data.results || [])
-    } catch (error) {
-      showToast('error', 'Error al cargar los pedidos')
-      console.error('Error loading orders:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [showToast])
-
+  // ✅ OPTIMIZACIÓN: Usar fetchOrdersOnce del store (cachea por 3 minutos)
+  // Si ya hay datos frescos en memoria, no hace request duplicado
+  // ✅ PAGINACIÓN: Cargar página específica
   useEffect(() => {
-    loadOrders()
-  }, [loadOrders])
+    fetchOrdersOnce(false, { page: currentPage, page_size: 20 }).catch((error) => {
+      console.error('Error loading orders:', error)
+      // El error ya está en el store (errorOrders)
+      setRetryCount(prev => prev + 1)
+      if (toastRef.current) {
+        toastRef.current.error('Error al cargar los pedidos')
+      }
+    })
+  }, [fetchOrdersOnce, currentPage])
+
+  // ✅ PREFETCH: Cargar siguiente página cuando el usuario está cerca del final
+  useEffect(() => {
+    if (pagination.next && !isLoadingOrders) {
+      // Prefetch cuando hay siguiente página disponible
+      const { prefetchNextPage } = useOrdersStore.getState()
+      prefetchNextPage(pagination.next).catch(() => {
+        // Silencioso, no crítico
+      })
+    }
+  }, [pagination.next, isLoadingOrders])
+
+  // Mostrar toast si hay error (solo una vez)
+  useEffect(() => {
+    if (errorOrders && toastRef.current && retryCount <= 1) {
+      toastRef.current.error(errorOrders)
+    }
+  }, [errorOrders, retryCount])
 
   const getStatusBadge = (status) => {
     // Mapeo de colores por código de estado (el label viene del backend en español)
@@ -76,7 +117,9 @@ const Orders = () => {
       const webpayEnabled = import.meta.env.VITE_WEBPAY_ENABLED === 'true'
       
       if (!webpayEnabled) {
-        showToast('error', 'Webpay no está habilitado')
+        if (toastRef.current) {
+          toastRef.current.error('Webpay no está habilitado')
+        }
         setProcessingOrderId(null)
         return
       }
@@ -88,18 +131,28 @@ const Orders = () => {
         sessionStorage.setItem('pending_order_id', orderId)
         sessionStorage.setItem('pending_order_amount', paymentResponse.amount || 0)
         
-        showToast('success', 'Redirigiendo a Webpay...')
+        if (toastRef.current) {
+          toastRef.current.success('Redirigiendo a Webpay...')
+        }
         
         // Pequeño delay para que el usuario vea el mensaje
         setTimeout(() => {
           paymentsService.redirectToWebpay(paymentResponse.token, paymentResponse.url)
         }, 1000)
+        
+        // ✅ OPTIMIZACIÓN: Recargar órdenes después de iniciar pago (force=true)
+        await fetchOrdersOnce(true)
+        if (toastRef.current) {
+          toastRef.current.success('Datos actualizados')
+        }
       } else {
         throw new Error('Respuesta inválida de Webpay')
       }
     } catch (error) {
       console.error('Error al reintentar pago:', error)
-      showToast('error', error.response?.data?.error || 'Error al iniciar el pago')
+      if (toastRef.current) {
+        toastRef.current.error(error.response?.data?.error || 'Error al iniciar el pago')
+      }
       setProcessingOrderId(null)
     }
   }
@@ -112,21 +165,59 @@ const Orders = () => {
     setProcessingOrderId(orderId)
     try {
       await ordersService.cancelOrder(orderId)
-      showToast('success', 'Pedido cancelado exitosamente')
-      // Recargar lista de pedidos
-      loadOrders()
+      if (toastRef.current) {
+        toastRef.current.success('Pedido cancelado exitosamente')
+      }
+      // ✅ OPTIMIZACIÓN: Recargar usando fetchOrdersOnce con force=true para refrescar datos
+      await fetchOrdersOnce(true)
+      if (toastRef.current) {
+        toastRef.current.success('Datos actualizados')
+      }
     } catch (error) {
       console.error('Error al cancelar pedido:', error)
-      showToast('error', error.response?.data?.error || 'Error al cancelar el pedido')
+      if (toastRef.current) {
+        toastRef.current.error(error.response?.data?.error || 'Error al cancelar el pedido')
+      }
     } finally {
       setProcessingOrderId(null)
     }
   }
 
-  if (loading) {
+  // Mostrar skeletons solo cuando isLoadingOrders es true y orders.length === 0
+  if (isLoadingOrders && orders.length === 0) {
     return (
-      <div className="min-h-screen flex justify-center items-center">
-        <Spinner size="lg" />
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-8">Mis Pedidos</h1>
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <OrderSkeleton key={i} />
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ✅ MEJORA: Mostrar error persistente si hay más de 2 intentos fallidos
+  if (errorOrders && retryCount > 2 && orders.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-8">Mis Pedidos</h1>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-8 text-center">
+            <p className="text-red-800 mb-4 text-lg">{errorOrders}</p>
+            <p className="text-red-600 mb-6 text-sm">No se pudo cargar después de varios intentos.</p>
+            <Button
+              onClick={() => {
+                setRetryCount(0)
+                fetchOrdersOnce(true).catch(() => {})
+              }}
+            >
+              Reintentar
+            </Button>
+          </div>
+        </div>
       </div>
     )
   }
@@ -185,12 +276,18 @@ const Orders = () => {
 
                 <div className="border-t pt-4">
                   <div className="space-y-2 mb-4">
-                    {order.items?.map((item) => (
+                    {order.items?.map((item, itemIndex) => (
                       <div key={item.id} className="flex items-center gap-4">
-                        <img
+                        <OptimizedImage
                           src={getProductImage(item.product)}
                           alt={item.product?.name}
                           className="w-16 h-16 object-cover rounded"
+                          width={64}
+                          height={64}
+                          loading={itemIndex < 2 ? 'eager' : 'lazy'}
+                          onError={(e) => {
+                            e.target.src = '/placeholder-product.jpg'
+                          }}
                         />
                         <div className="flex-1">
                           <Link
@@ -255,6 +352,33 @@ const Orders = () => {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ✅ PAGINACIÓN: Controles de paginación */}
+        {pagination && pagination.count > 0 && (
+          <div className="mt-8 flex items-center justify-between">
+            <div className="text-sm text-gray-600">
+              Mostrando {((currentPage - 1) * (pagination.pageSize || 20)) + 1} - {Math.min(currentPage * (pagination.pageSize || 20), pagination.count)} de {pagination.count} pedidos
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={!pagination.previous || isLoadingOrders}
+              >
+                Anterior
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => prev + 1)}
+                disabled={!pagination.next || isLoadingOrders}
+              >
+                Siguiente
+              </Button>
+            </div>
           </div>
         )}
       </div>

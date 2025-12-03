@@ -55,10 +55,15 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_subtotal(self, obj):
         """Calcula el subtotal sumando todos los items"""
-        return sum(item.total_price for item in obj.items.all())
+        # ✅ OPTIMIZACIÓN: Cachear resultado para evitar múltiples evaluaciones del queryset
+        if not hasattr(obj, '_subtotal_cache'):
+            items = obj.items.all()  # Usa prefetch si existe
+            obj._subtotal_cache = sum(item.total_price for item in items)
+        return obj._subtotal_cache
 
     def get_shipping_cost(self, obj):
         """Costo de envío fijo (puede modificarse después)"""
+        # ✅ OPTIMIZACIÓN: Usar get_subtotal que ya está cacheado
         subtotal = self.get_subtotal(obj)
         if subtotal >= 50000:  # Envío gratis sobre 50k
             return 0
@@ -66,17 +71,21 @@ class CartSerializer(serializers.ModelSerializer):
 
     def get_total(self, obj):
         """Total = subtotal + shipping"""
+        # ✅ OPTIMIZACIÓN: Usar métodos cacheados
         subtotal = self.get_subtotal(obj)
         shipping = self.get_shipping_cost(obj)
         return subtotal + shipping
 
     def get_subtotal_formatted(self, obj):
+        # ✅ OPTIMIZACIÓN: Usar get_subtotal cacheado
         return format_clp(self.get_subtotal(obj))
 
     def get_shipping_cost_formatted(self, obj):
+        # ✅ OPTIMIZACIÓN: Usar get_shipping_cost que usa get_subtotal cacheado
         return format_clp(self.get_shipping_cost(obj))
 
     def get_total_formatted(self, obj):
+        # ✅ OPTIMIZACIÓN: Usar get_total que usa métodos cacheados
         return format_clp(self.get_total(obj))
 
 

@@ -14,21 +14,27 @@ import { useToast } from '../components/common/Toast'
 
 const Cart = () => {
   const navigate = useNavigate()
-  const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(null)
+  const [localQuantities, setLocalQuantities] = useState({})
   const {
     items,
     subtotal,
     total,
     totalDiscount,
-    setCart,
+    isLoading,
+    fetchCart,
     updateItemQuantity,
+    updateItemFromBackend,
     removeItem,
-    updateTotals,
   } = useCartStore()
   const { isAuthenticated } = useAuthStore()
   const toast = useToast()
   const toastRef = useRef(toast)
+  
+  // Protección contra React.StrictMode (doble ejecución en desarrollo)
+  const hasFetchedRef = useRef(false)
+  const lastAuthStateRef = useRef(isAuthenticated)
+  const debounceTimersRef = useRef({})
 
   useEffect(() => {
     toastRef.current = toast
@@ -42,74 +48,193 @@ const Cart = () => {
     current[type](message)
   }, [])
 
-  const loadCart = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await cartService.getCart()
-      setCart(data)
-    } catch (error) {
+  // ✅ OPTIMIZACIÓN: Un solo useEffect que maneja carga inicial y cambios de autenticación
+  // Protegido contra StrictMode con useRef
+  // ✅ MEJORA: Funciona tanto para usuarios autenticados como invitados (guests)
+  useEffect(() => {
+    // Si ya se hizo fetch y el estado de autenticación no cambió, no hacer nada
+    if (hasFetchedRef.current && lastAuthStateRef.current === isAuthenticated) {
+      return
+    }
+    
+    hasFetchedRef.current = true
+    lastAuthStateRef.current = isAuthenticated
+    
+    // Fetch del carrito (funciona para autenticados y guests)
+    // La lógica de guest vs authenticated está en el backend
+    fetchCart().catch((error) => {
       console.error('Error loading cart:', error)
-      showToast('error', 'Error al cargar el carrito')
-    } finally {
-      setLoading(false)
-    }
-  }, [setCart, showToast])
+      // No mostrar error si es 401/403 para guests (es normal si no hay session_token aún)
+      const accessToken = localStorage.getItem('accessToken')
+      if (accessToken && error.response?.status !== 401 && error.response?.status !== 403) {
+        showToast('error', 'Error al cargar el carrito')
+      }
+    })
+  }, [isAuthenticated, fetchCart, showToast])
 
+  // Inicializar localQuantities cuando cambian los items
   useEffect(() => {
-    loadCart()
-  }, [loadCart])
+    const initialQuantities = {}
+    items.forEach(item => {
+      if (item.id) {
+        initialQuantities[item.id] = item.quantity
+      }
+    })
+    setLocalQuantities(prev => {
+      // Solo actualizar si hay cambios reales (evitar loops)
+      const hasChanges = items.some(item => item.id && prev[item.id] !== item.quantity)
+      if (hasChanges || Object.keys(prev).length !== Object.keys(initialQuantities).length) {
+        return initialQuantities
+      }
+      return prev
+    })
+  }, [items]) // Actualizar cuando cambian los items
 
-  // ✅ CORRECCIÓN: Sincronizar carrito cuando cambia el estado de autenticación
-  // Esto asegura que al iniciar sesión, el carrito se sincronice correctamente
+  // Cleanup de timers al desmontar
   useEffect(() => {
-    if (isAuthenticated) {
-      // Cuando el usuario se autentica, recargar el carrito para sincronizar
-      loadCart()
+    return () => {
+      Object.values(debounceTimersRef.current).forEach(timer => {
+        if (timer) clearTimeout(timer)
+      })
     }
-  }, [isAuthenticated, loadCart])
+  }, [])
 
-  const handleUpdateQuantity = async (itemId, quantity) => {
-    if (quantity < 1) {
+  // Flag para mostrar toast solo la primera vez
+  const hasShownSavingToastRef = useRef({})
+
+  // ✅ MEJORA: Calcular totales optimistas inmediatamente
+  const calculateOptimisticTotals = useCallback((items, localQty) => {
+    if (!Array.isArray(items) || items.length === 0) {
+      return { subtotal: 0, total: 0, totalDiscount: 0, shipping: 0 }
+    }
+
+    const subtotal = items.reduce((sum, item) => {
+      const qty = localQty[item.id] ?? item.quantity
+      const price = parseFloat(item.unit_price) || 0
+      return sum + (price * qty)
+    }, 0)
+
+    const totalDiscount = items.reduce((sum, item) => {
+      const qty = localQty[item.id] ?? item.quantity
+      const originalPrice = parseFloat(item.product?.price || item.unit_price) || 0
+      const discountedPrice = parseFloat(item.unit_price) || 0
+      if (originalPrice > discountedPrice) {
+        return sum + ((originalPrice - discountedPrice) * qty)
+      }
+      return sum
+    }, 0)
+
+    const FREE_SHIPPING_THRESHOLD = 50000
+    const SHIPPING_COST = 5000
+    const shipping = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_COST
+    const total = subtotal + shipping
+
+    return { subtotal, total, totalDiscount, shipping }
+  }, [])
+
+  // Estado para totales optimistas
+  const [optimisticTotals, setOptimisticTotals] = useState(null)
+
+  // Calcular totales optimistas cuando cambian items o localQuantities
+  useEffect(() => {
+    if (items.length > 0) {
+      const totals = calculateOptimisticTotals(items, localQuantities)
+      setOptimisticTotals(totals)
+    } else {
+      setOptimisticTotals(null)
+    }
+  }, [items, localQuantities, calculateOptimisticTotals])
+
+  // Handler inmediato para actualizar UI (optimistic)
+  const handleQuantityChange = (itemId, newQuantity) => {
+    if (newQuantity < 1) {
       handleRemoveItem(itemId)
       return
     }
 
+    // ✅ OPTIMISTIC UI: Actualizar UI inmediatamente
+    setLocalQuantities(prev => {
+      const updated = { ...prev, [itemId]: newQuantity }
+      // ✅ MEJORA: Calcular totales optimistas INMEDIATAMENTE
+      const totals = calculateOptimisticTotals(items, updated)
+      setOptimisticTotals(totals)
+      return updated
+    })
+    updateItemQuantity(itemId, newQuantity)
+
+    // ✅ TOAST SUAVE: Mostrar "Guardando cambios..." solo la primera vez por item
+    if (!hasShownSavingToastRef.current[itemId]) {
+      hasShownSavingToastRef.current[itemId] = true
+      // Toast discreto y no intrusivo
+      if (import.meta.env.DEV) {
+        console.log('[Cart] Guardando cambios para item', itemId)
+      }
+    }
+
+    // Limpiar timer anterior si existe
+    if (debounceTimersRef.current[itemId]) {
+      clearTimeout(debounceTimersRef.current[itemId])
+    }
+
+    // ✅ DEBOUNCE: Esperar 250ms antes de enviar al backend
+    debounceTimersRef.current[itemId] = setTimeout(() => {
+      handleUpdateQuantityDebounced(itemId, newQuantity)
+    }, 250)
+  }
+
+  // Handler que se ejecuta después del debounce
+  const handleUpdateQuantityDebounced = async (itemId, quantity) => {
     // Prevenir múltiples peticiones simultáneas para el mismo item
     if (updating === itemId) {
       return
     }
 
     // Guardar cantidad anterior para revertir en caso de error
-    const previousItem = items.find(item => item.id === itemId)
-    const previousQuantity = previousItem?.quantity
+    const previousQuantity = localQuantities[itemId]
 
-    // Optimistic update: actualizar UI inmediatamente
     setUpdating(itemId)
-    updateItemQuantity(itemId, quantity)
-    updateTotals()
 
     try {
-      // Sincronizar con servidor - esperar respuesta antes de mostrar toast
-      await cartService.updateCartItem(itemId, { quantity })
+      // ✅ Sincronizar con servidor - usar respuesta del backend para actualizar item específico
+      const response = await cartService.updateCartItem(itemId, { quantity })
       
-      // ✅ CORRECCIÓN: Recargar carrito completo después de actualizar exitosamente
-      // para sincronizar con datos reales del servidor (precios, stock, etc.)
-      await loadCart()
+      // ✅ OPTIMIZACIÓN: Actualizar solo el item específico con la respuesta del backend
+      // El backend devuelve: { message: 'Item actualizado', item: { ... } }
+      // No recargar todo el carrito
+      if (response && response.item) {
+        // El backend devuelve el item en response.item
+        updateItemFromBackend(response.item)
+        // ✅ MEJORA: Recalcular totales con datos del backend
+        const { items: updatedItems } = useCartStore.getState()
+        const totals = calculateOptimisticTotals(updatedItems, localQuantities)
+        setOptimisticTotals(totals)
+      } else if (response && response.id) {
+        // Fallback: si la respuesta es el item directamente
+        updateItemFromBackend(response)
+        const { items: updatedItems } = useCartStore.getState()
+        const totals = calculateOptimisticTotals(updatedItems, localQuantities)
+        setOptimisticTotals(totals)
+      }
       
-      // Mostrar toast solo después de que se actualizó exitosamente
-      showToast('success', 'Cantidad actualizada')
+      // No mostrar toast para cada cambio (evitar spam)
     } catch (error) {
       // Revertir cambio en caso de error
       if (previousQuantity !== undefined) {
+        setLocalQuantities(prev => {
+          const reverted = { ...prev, [itemId]: previousQuantity }
+          // Recalcular totales con valores revertidos
+          const { items: currentItems } = useCartStore.getState()
+          const totals = calculateOptimisticTotals(currentItems, reverted)
+          setOptimisticTotals(totals)
+          return reverted
+        })
         updateItemQuantity(itemId, previousQuantity)
-        updateTotals()
       }
       showToast('error', error.response?.data?.error || 'Error al actualizar cantidad')
       console.error('Error updating cart item:', error)
-      // Recargar carrito para sincronizar con servidor
-      await loadCart()
     } finally {
       setUpdating(null)
+      delete debounceTimersRef.current[itemId]
     }
   }
 
@@ -126,30 +251,48 @@ const Cart = () => {
       return
     }
     
-    // Optimistic update: eliminar inmediatamente de la UI
+    // Limpiar debounce timer si existe
+    if (debounceTimersRef.current[itemId]) {
+      clearTimeout(debounceTimersRef.current[itemId])
+      delete debounceTimersRef.current[itemId]
+    }
+    
+    // ✅ OPTIMISTIC UI: Eliminar inmediatamente de la UI para respuesta instantánea
     setUpdating(itemId)
     removeItem(itemId)
-    updateTotals()
     
-    // Mostrar toast inmediatamente
-    showToast('success', 'Producto eliminado del carrito')
+    // Actualizar localQuantities
+    setLocalQuantities(prev => {
+      const newQuantities = { ...prev }
+      delete newQuantities[itemId]
+      return newQuantities
+    })
 
     try {
       // Sincronizar con servidor en background
       await cartService.removeCartItem(itemId)
-      // Si la petición fue exitosa (200 o 204), no necesitamos hacer nada más
+      // Si la petición fue exitosa, no necesitamos hacer nada más
       // El item ya fue eliminado del estado local
     } catch (error) {
-      // Si el error es 404, el item ya no existe en el backend
-      // El backend ahora devuelve 200 si ya no existe, pero por compatibilidad
-      // manejamos también 404
-      if (error.response?.status === 404 || error.response?.status === 200) {
+      // ✅ MEJORA: Manejar 404 correctamente (producto ya no existe)
+      if (error.response?.status === 404) {
         // El item ya no existe en el backend, mantener el estado actual
-        // No mostrar error ya que la operación fue exitosa
+        // No mostrar error ya que la operación fue exitosa (optimistic delete funcionó)
+        if (import.meta.env.DEV) {
+          console.log('[Cart] Item ya no existe en backend (404), manteniendo estado optimista')
+        }
+      } else if (error.response?.status === 200) {
+        // Backend confirmó eliminación exitosa
+        // No hacer nada, el estado ya está actualizado
       } else {
-        // Otro tipo de error - revertir cambio recargando carrito completo
+        // Otro tipo de error - revertir cambio insertando el item de nuevo
         if (itemToRemove) {
-          await loadCart()
+          const { items: currentItems, setCart } = useCartStore.getState()
+          const newItems = [...currentItems, itemToRemove]
+          // Usar setCart para actualizar correctamente con cálculo de totales
+          setCart({ items: newItems })
+          
+          setLocalQuantities(prev => ({ ...prev, [itemId]: itemToRemove.quantity }))
         }
         showToast('error', 'Error al eliminar producto')
         console.error('Error removing cart item:', error)
@@ -159,7 +302,7 @@ const Cart = () => {
     }
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="min-h-screen flex justify-center items-center">
         <Spinner size="lg" />
@@ -236,8 +379,8 @@ const Cart = () => {
                     
                     <div className="flex items-center gap-4 mt-4">
                       <QuantityStepper
-                        value={item.quantity}
-                        onChange={(qty) => handleUpdateQuantity(item.id, qty)}
+                        value={localQuantities[item.id] ?? item.quantity}
+                        onChange={(qty) => handleQuantityChange(item.id, qty)}
                         disabled={updating === item.id}
                         max={item.product?.stock_qty || 999}
                       />
@@ -273,25 +416,26 @@ const Cart = () => {
               <div className="space-y-3 mb-4">
                 <div className="flex justify-between text-gray-700">
                   <span>Productos ({items.length})</span>
-                  <span>{formatPrice(subtotal || 0)}</span>
+                  <span>{formatPrice(optimisticTotals?.subtotal ?? subtotal ?? 0)}</span>
                 </div>
-                {totalDiscount > 0 && (
+                {(optimisticTotals?.totalDiscount ?? totalDiscount) > 0 && (
                   <div className="flex justify-between text-gray-700">
                     <span className="text-green-600">Descuentos</span>
-                    <span className="text-green-600 font-semibold">-{formatPrice(totalDiscount || 0)}</span>
+                    <span className="text-green-600 font-semibold">-{formatPrice(optimisticTotals?.totalDiscount ?? totalDiscount ?? 0)}</span>
                   </div>
                 )}
                 
                 <div className="border-t pt-3 flex justify-between text-xl font-bold text-gray-900">
                   <span>Total</span>
-                  <span>{formatPrice(total ?? subtotal ?? 0)}</span>
+                  <span>{formatPrice(optimisticTotals?.total ?? total ?? subtotal ?? 0)}</span>
                 </div>
               </div>
 
               <Button
                 onClick={() => {
-                  // Para usuarios autenticados, ir directo a dirección
-                  // Para invitados, ir a datos del cliente primero
+                  // ✅ CORRECCIÓN: Permitir checkout para invitados
+                  // Autenticados: Carro → Dirección → Pago (3 pasos)
+                  // Invitados: Carro → Datos → Dirección → Pago (4 pasos)
                   if (isAuthenticated) {
                     navigate('/checkout/address')
                   } else {

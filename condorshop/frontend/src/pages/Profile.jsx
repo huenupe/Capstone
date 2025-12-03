@@ -4,9 +4,11 @@ import { useForm } from 'react-hook-form'
 import Button from '../components/common/Button'
 import TextField from '../components/forms/TextField'
 import Spinner from '../components/common/Spinner'
+import Modal from '../components/common/Modal'
 import { authService } from '../services/auth'
 import { usersService } from '../services/users'
 import { useAuthStore } from '../store/authSlice'
+import { useOrdersStore } from '../store/ordersSlice'
 import { useToast } from '../components/common/Toast'
 import { validateName, validateChileanPhone } from '../utils/validations'
 import AddressForm from '../components/profile/AddressForm'
@@ -17,6 +19,7 @@ import { REGIONS } from '../constants/regions'
 const Profile = () => {
   const navigate = useNavigate()
   const { user, updateUser, logout } = useAuthStore()
+  const { fetchOrdersOnce } = useOrdersStore()
   const [loading, setLoading] = useState(false)
   const [loadingProfile, setLoadingProfile] = useState(true)
   const [hasChanges, setHasChanges] = useState(false)
@@ -26,6 +29,8 @@ const Profile = () => {
   const [loadingAddresses, setLoadingAddresses] = useState(false)
   const [editingAddressId, setEditingAddressId] = useState(null)
   const [showAddressForm, setShowAddressForm] = useState(false)
+  const [showEditPersonalDataModal, setShowEditPersonalDataModal] = useState(false)
+  const [isSavingPersonalData, setIsSavingPersonalData] = useState(false)
   const toast = useToast()
   const toastRef = useRef(toast)
 
@@ -49,24 +54,56 @@ const Profile = () => {
     watch,
   } = useForm()
   
+  // Formulario para edición de datos personales en modal
+  const {
+    register: registerPersonalData,
+    handleSubmit: handleSubmitPersonalData,
+    formState: { errors: errorsPersonalData },
+    reset: resetPersonalData,
+  } = useForm()
+  
   const watchedValues = watch()
 
-  const loadProfile = useCallback(async () => {
-    setLoadingProfile(true)
-    try {
-      const profileData = await authService.getProfile()
-      updateUser(profileData)
-    } catch (error) {
-      showToast('error', 'Error al cargar el perfil')
-      console.error('Error loading profile:', error)
-    } finally {
-      setLoadingProfile(false)
-    }
-  }, [showToast, updateUser])
-
+  // ✅ OPTIMIZACIÓN: Cargar perfil, direcciones y órdenes en paralelo
+  // Evita cascadas de peticiones (waterfalls) mejorando tiempo de carga
   useEffect(() => {
-    loadProfile()
-  }, [loadProfile])
+    const loadDataInParallel = async () => {
+      setLoadingProfile(true)
+      
+      try {
+        // Ejecutar todas las peticiones en paralelo
+        const [profileData, addresses] = await Promise.all([
+          authService.getProfile().catch(err => {
+            console.error('Error loading profile:', err)
+            showToast('error', 'Error al cargar el perfil')
+            return null
+          }),
+          usersService.getAddresses().catch(err => {
+            console.error('Error loading saved addresses:', err)
+            return []
+          }),
+        ])
+        
+        // Actualizar estado con los datos obtenidos
+        if (profileData) {
+          updateUser(profileData)
+        }
+        setSavedAddresses(addresses || [])
+        
+        // Cargar órdenes en paralelo (usa el store con cache)
+        fetchOrdersOnce().catch(err => {
+          console.error('Error loading orders:', err)
+          // No mostrar toast aquí, el componente OrderHistory maneja el error
+        })
+      } catch (error) {
+        console.error('Error loading data:', error)
+      } finally {
+        setLoadingProfile(false)
+      }
+    }
+    
+    loadDataInParallel()
+  }, [showToast, updateUser, fetchOrdersOnce])
 
   useEffect(() => {
     if (user) {
@@ -76,24 +113,14 @@ const Profile = () => {
         email: user.email || '',
         phone: user.phone || '',
       })
+      // Pre-llenar formulario del modal con datos actuales
+      resetPersonalData({
+        first_name: user.first_name || '',
+        last_name: user.last_name || '',
+        phone: user.phone || '',
+      })
     }
-  }, [user, reset])
-
-  const loadSavedAddresses = useCallback(async () => {
-    setLoadingAddresses(true)
-    try {
-      const addresses = await usersService.getAddresses()
-      setSavedAddresses(addresses || [])
-    } catch (error) {
-      console.error('Error loading saved addresses:', error)
-    } finally {
-      setLoadingAddresses(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    loadSavedAddresses()
-  }, [loadSavedAddresses])
+  }, [user, reset, resetPersonalData])
 
   useEffect(() => {
     setHasChanges(isDirty)
@@ -180,6 +207,45 @@ const Profile = () => {
     }
   }
 
+  // Handler para abrir modal de edición de datos personales
+  const handleOpenEditPersonalData = () => {
+    if (user) {
+      resetPersonalData({
+        first_name: user.first_name || '',
+        last_name: user.last_name || '',
+        phone: user.phone || '',
+      })
+    }
+    setShowEditPersonalDataModal(true)
+  }
+
+  // Handler para guardar datos personales
+  const handleSavePersonalData = async (data) => {
+    setIsSavingPersonalData(true)
+    try {
+      // PATCH /api/users/profile con los campos modificados
+      const updatedUser = await authService.updateProfile({
+        first_name: data.first_name,
+        last_name: data.last_name,
+        phone: data.phone,
+      })
+      
+      // Actualizar estado global
+      updateUser(updatedUser)
+      
+      // Cerrar modal
+      setShowEditPersonalDataModal(false)
+      
+      // Mostrar toast de éxito
+      showToast('success', 'Datos personales actualizados exitosamente')
+    } catch (error) {
+      console.error('Error updating personal data:', error)
+      showToast('error', error.response?.data?.error || 'Error al actualizar los datos personales')
+    } finally {
+      setIsSavingPersonalData(false)
+    }
+  }
+
   if (loadingProfile) {
     return (
       <div className="min-h-screen flex justify-center items-center">
@@ -209,7 +275,17 @@ const Profile = () => {
         <form onSubmit={handleSubmit(onSubmit)}>
           <div className="bg-white shadow-md rounded-lg p-8 space-y-6">
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Información Personal</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">Información Personal</h2>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenEditPersonalData}
+                >
+                  Editar datos
+                </Button>
+              </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <TextField
@@ -466,6 +542,83 @@ const Profile = () => {
           <OrderHistory />
         </div>
       </div>
+
+      {/* Modal de Edición de Datos Personales */}
+      <Modal
+        isOpen={showEditPersonalDataModal}
+        onClose={() => setShowEditPersonalDataModal(false)}
+        title="Editar Datos Personales"
+        size="md"
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowEditPersonalDataModal(false)}
+              disabled={isSavingPersonalData}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSubmitPersonalData(handleSavePersonalData)}
+              disabled={isSavingPersonalData}
+            >
+              {isSavingPersonalData ? (
+                <>
+                  <Spinner size="sm" className="mr-2" />
+                  Guardando...
+                </>
+              ) : (
+                'Guardar Cambios'
+              )}
+            </Button>
+          </div>
+        }
+      >
+        <form onSubmit={handleSubmitPersonalData(handleSavePersonalData)}>
+          <div className="space-y-4">
+            <TextField
+              label="Nombre"
+              name="first_name"
+              register={registerPersonalData}
+              validation={{
+                required: 'El nombre es requerido',
+                validate: validateName,
+              }}
+              error={errorsPersonalData.first_name?.message}
+            />
+
+            <TextField
+              label="Apellido"
+              name="last_name"
+              register={registerPersonalData}
+              validation={{
+                required: 'El apellido es requerido',
+                validate: validateName,
+              }}
+              error={errorsPersonalData.last_name?.message}
+            />
+
+            <TextField
+              label="Teléfono"
+              name="phone"
+              type="tel"
+              register={registerPersonalData}
+              validation={{
+                validate: validateChileanPhone,
+              }}
+              error={errorsPersonalData.phone?.message}
+              placeholder="+56912345678"
+              helperText="Formato: +569 + 8 dígitos"
+            />
+
+            <div className="text-sm text-gray-500 mt-4">
+              <p>Nota: El email no se puede cambiar desde aquí.</p>
+            </div>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }

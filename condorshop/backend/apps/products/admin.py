@@ -202,6 +202,10 @@ class ProductPriceHistoryInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
+    # ✅ OPTIMIZACIÓN ADMIN: Reducir filas por página para mejorar rendimiento
+    list_per_page = 25
+    # ✅ OPTIMIZACIÓN ADMIN: Evitar N+1 queries en listado
+    list_select_related = ('category',)
     form = ProductAdminForm
     list_display = ('name', 'sku', 'category', 'price_clp', 'stock_info', 'active', 'created_at')
     list_filter = ('category', 'active', 'created_at')
@@ -410,6 +414,10 @@ class ProductPriceHistoryAdmin(admin.ModelAdmin):
 @admin.register(InventoryMovement)
 class InventoryMovementAdmin(admin.ModelAdmin):
     """Admin para movimientos de inventario"""
+    # ✅ OPTIMIZACIÓN ADMIN: Reducir filas por página para mejorar rendimiento
+    list_per_page = 50
+    # ✅ OPTIMIZACIÓN ADMIN: Evitar N+1 queries en listado
+    list_select_related = ('product', 'product__category', 'created_by')
     list_display = ('product', 'movement_type', 'quantity_change_display', 'quantity_after', 'reason', 'reference_info', 'created_at')
     list_filter = ('movement_type', 'created_at', 'product__category')
     search_fields = ('product__name', 'product__sku', 'reason', 'reference_id')

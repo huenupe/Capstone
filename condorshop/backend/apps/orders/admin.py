@@ -89,21 +89,40 @@ class OrderAdmin(admin.ModelAdmin):
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
+    # ✅ OPTIMIZACIÓN ADMIN: Reducir filas por página para mejorar rendimiento
+    list_per_page = 25
+    # ✅ OPTIMIZACIÓN ADMIN: Evitar N+1 queries en listado
+    list_select_related = ('order', 'status')
+    # ✅ OPTIMIZACIÓN ADMIN: Desactivar contador completo (evita COUNT(*) costoso)
+    show_full_result_count = False
+    # ✅ OPTIMIZACIÓN ADMIN: Ordenar por campo indexado
+    ordering = ('-created_at',)
     list_display = ('id', 'order', 'status', 'amount_display', 'current_transaction_display', 'created_at')
     list_filter = ('status', 'created_at')
     search_fields = ('order__shipping_snapshot__customer_email',)
     
     def get_queryset(self, request):
-        """Optimizar queries con select_related y prefetch_related"""
+        """
+        Optimizar queries con select_related y prefetch_related.
+        ✅ OPTIMIZACIÓN: Prefetch de transacciones con to_attr para evitar N+1 en amount/current_transaction.
+        ✅ OPTIMIZACIÓN: Incluir order__shipping_snapshot en select_related porque Order.__str__ accede a él.
+        """
         qs = super().get_queryset(request)
-        # PaymentTransaction ahora se relaciona con Order, no con Payment
-        # Accedemos a través de order.payment_transactions
-        # ✅ CORRECCIÓN: Excluir gateway_response del prefetch para evitar errores de deserialización
-        # cuando hay datos corruptos (dict en lugar de JSON string)
-        payment_transactions_qs = PaymentTransaction.objects.defer('gateway_response')
-        return qs.select_related('order', 'status').prefetch_related(
-            Prefetch('order__payment_transactions', queryset=payment_transactions_qs)
+        # Selecciona relaciones directas incluyendo shipping_snapshot (usado en Order.__str__)
+        qs = qs.select_related('order', 'order__shipping_snapshot', 'status')
+        # Prefetch de todas las transacciones del pedido para evitar N+1 en amount/current_transaction
+        # Usar only() para cargar solo campos necesarios y defer() para excluir gateway_response (JSON grande)
+        payment_transactions_qs = PaymentTransaction.objects.only(
+            'id', 'order_id', 'status', 'payment_method', 'amount', 'created_at', 'webpay_buy_order'
+        ).defer('gateway_response')
+        qs = qs.prefetch_related(
+            Prefetch(
+                'order__payment_transactions',
+                queryset=payment_transactions_qs,
+                to_attr='prefetched_payment_transactions'
+            )
         )
+        return qs
     
     def status(self, obj):
         return obj.status.code if obj.status else '-'
@@ -137,18 +156,32 @@ class PaymentAdmin(admin.ModelAdmin):
 
 @admin.register(PaymentTransaction)
 class PaymentTransactionAdmin(admin.ModelAdmin):
+    # ✅ OPTIMIZACIÓN ADMIN: Reducir filas por página para mejorar rendimiento
+    list_per_page = 25
+    # ✅ OPTIMIZACIÓN ADMIN: Evitar N+1 queries en listado
+    list_select_related = ('order',)
+    # ✅ OPTIMIZACIÓN ADMIN: Desactivar contador completo (evita COUNT(*) costoso)
+    show_full_result_count = False
+    # ✅ OPTIMIZACIÓN ADMIN: Ordenar por campo indexado
+    ordering = ('-created_at',)
     list_display = ('id', 'order', 'payment_method', 'status', 'amount_display', 'card_info', 'created_at')
     list_filter = ('payment_method', 'status', 'created_at')
     search_fields = ('webpay_buy_order', 'webpay_token', 'order__id')
     
     def get_queryset(self, request):
-        """Optimizar queries con select_related"""
-        # ✅ CORRECCIÓN: Excluir gateway_response para evitar errores de deserialización
-        # cuando hay datos corruptos (dict en lugar de JSON string)
+        """
+        Optimizar queries con select_related y defer de campos grandes.
+        ✅ OPTIMIZACIÓN: NO cargar gateway_response (JSON grande) en el listado.
+        ✅ OPTIMIZACIÓN: Incluir order__shipping_snapshot porque Order.__str__ accede a él.
+        """
         qs = super().get_queryset(request)
-        return qs.select_related('order').defer('gateway_response')
+        # Incluir shipping_snapshot porque Order.__str__ lo usa cuando se muestra 'order' en list_display
+        qs = qs.select_related('order', 'order__shipping_snapshot')
+        qs = qs.defer('gateway_response')  # NO cargar JSON grande
+        return qs
     
     def order(self, obj):
+        # ✅ OPTIMIZACIÓN: Solo acceder a order.id (ya está en select_related, no hace query adicional)
         return f"Orden #{obj.order.id}"
     order.short_description = 'Pedido'
     order.admin_order_field = 'order__id'
@@ -316,6 +349,10 @@ class ShippingRuleAdmin(admin.ModelAdmin):
 
 @admin.register(OrderShippingSnapshot)
 class OrderShippingSnapshotAdmin(admin.ModelAdmin):
+    # ✅ OPTIMIZACIÓN ADMIN: Reducir filas por página para mejorar rendimiento
+    list_per_page = 50
+    # ✅ OPTIMIZACIÓN ADMIN: Evitar N+1 queries en listado
+    list_select_related = ('original_user', 'original_address')
     list_display = ('id', 'customer_name', 'customer_email', 'shipping_city', 'shipping_region', 'original_user', 'created_at')
     list_filter = ('shipping_region', 'created_at')
     search_fields = ('customer_name', 'customer_email', 'shipping_city', 'shipping_street')
@@ -329,6 +366,11 @@ class OrderShippingSnapshotAdmin(admin.ModelAdmin):
 
 @admin.register(OrderItemSnapshot)
 class OrderItemSnapshotAdmin(admin.ModelAdmin):
+    # ✅ OPTIMIZACIÓN ADMIN: Reducir filas por página para mejorar rendimiento
+    list_per_page = 50
+    # ✅ OPTIMIZACIÓN ADMIN: Evitar N+1 queries en listado
+    # Nota: OrderItemSnapshot no tiene FK directa a Order o Product (solo product_id como IntegerField)
+    # Por lo tanto, list_select_related no aplica aquí, pero mantenemos get_queryset optimizado
     list_display = ('id', 'product_name', 'product_sku', 'unit_price', 'total_price', 'product_id', 'created_at')
     list_filter = ('created_at', 'product_category_name')
     search_fields = ('product_name', 'product_sku', 'product_brand')

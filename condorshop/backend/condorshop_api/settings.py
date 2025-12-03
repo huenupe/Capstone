@@ -68,6 +68,8 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'apps.audit.middleware.AuditMiddleware',
+    # ✅ OPTIMIZACIÓN: Middleware de performance (solo activo en DEBUG o si se configura)
+    'apps.common.middleware.PerformanceLoggingMiddleware',
 ]
 
 ROOT_URLCONF = 'condorshop_api.urls'
@@ -291,6 +293,11 @@ LOGGING = {
             'format': '{levelname} {message}',
             'style': '{',
         },
+        'performance': {
+            'format': '{asctime} {message}',
+            'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
     },
     'filters': {
         'require_debug_true': {
@@ -329,6 +336,13 @@ LOGGING = {
             'handlers': ['console', 'file'],
             'level': 'INFO',
             'propagate': False,
+        },
+        # ✅ OPTIMIZACIÓN: Logger para métricas de performance
+        'performance': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+            'formatter': 'performance',
         },
     },
 }

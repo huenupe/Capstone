@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { formatPrice } from '../../utils/formatPrice'
 import { getProductImage } from '../../utils/getProductImage'
+import OptimizedImage from '../common/OptimizedImage'
 import Button from '../common/Button'
 
 const OrderCard = ({ order, onViewDetails }) => {
@@ -65,12 +66,18 @@ const OrderCard = ({ order, onViewDetails }) => {
       {displayedItems.length > 0 && (
         <div className="border-t pt-4 mb-4">
           <div className="space-y-2">
-            {displayedItems.map((item) => (
+            {displayedItems.map((item, index) => (
               <div key={item.id} className="flex items-center gap-3">
-                <img
+                <OptimizedImage
                   src={getProductImage(item.product)}
                   alt={item.product?.name || item.product_name_snapshot}
                   className="w-12 h-12 object-cover rounded"
+                  width={48}
+                  height={48}
+                  loading={index === 0 ? 'eager' : 'lazy'}
+                  onError={(e) => {
+                    e.target.src = '/placeholder-product.jpg'
+                  }}
                 />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 truncate">

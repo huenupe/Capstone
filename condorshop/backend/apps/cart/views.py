@@ -3,6 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from django.db import transaction
+from django.conf import settings
 from .models import Cart, CartItem
 from .serializers import CartSerializer, AddToCartSerializer, UpdateCartItemSerializer
 from apps.products.models import Product
@@ -20,6 +21,64 @@ def get_cart(request):
             session_token = str(uuid.uuid4())
         cart, _ = Cart.get_or_create_cart(session_token=session_token)
     return cart, session_token if not request.user.is_authenticated else None
+
+
+def get_cart_optimized(request):
+    """
+    Helper para obtener o crear carrito con prefetch optimizado.
+    Usar solo en view_cart() para evitar recarga innecesaria.
+    
+    ✅ OPTIMIZACIÓN: Hace prefetch directamente en la búsqueda inicial,
+    evitando la query adicional .get(id=cart.id) después de get_or_create_cart().
+    """
+    from django.db.models import Prefetch
+    from apps.products.models import ProductImage
+    
+    # Preparar prefetch optimizado para imágenes (ordenadas por position)
+    images_prefetch = Prefetch(
+        'items__product__images',
+        queryset=ProductImage.objects.order_by('position'),
+        to_attr='ordered_images_for_product'
+    )
+    
+    # Queryset base optimizado
+    optimized_queryset = Cart.objects.select_related('user').prefetch_related(
+        'items__product__category',
+        images_prefetch
+    )
+    
+    if request.user.is_authenticated:
+        # ✅ OPTIMIZACIÓN: Buscar carrito activo con prefetch directamente
+        # en lugar de buscar primero y luego recargar
+        cart = optimized_queryset.filter(
+            user=request.user, 
+            is_active=True
+        ).order_by('-created_at').first()
+        
+        if not cart:
+            # Si no existe, crear y luego recargar con prefetch (única query adicional necesaria)
+            cart, _ = Cart.get_or_create_cart(user=request.user)
+            cart = optimized_queryset.get(id=cart.id)
+        
+        return cart, None
+    else:
+        session_token = request.headers.get('X-Session-Token')
+        if not session_token:
+            import uuid
+            session_token = str(uuid.uuid4())
+        
+        # ✅ OPTIMIZACIÓN: Buscar carrito activo con prefetch directamente
+        cart = optimized_queryset.filter(
+            session_token=session_token,
+            is_active=True
+        ).order_by('-created_at').first()
+        
+        if not cart:
+            # Si no existe, crear y luego recargar con prefetch
+            cart, _ = Cart.get_or_create_cart(session_token=session_token)
+            cart = optimized_queryset.get(id=cart.id)
+        
+        return cart, session_token
 
 
 @api_view(['POST'])
@@ -104,31 +163,40 @@ def view_cart(request):
     Ver carrito del usuario/sesión
     GET /api/cart/
     Actualiza automáticamente los precios de los items si han cambiado (por descuentos)
-    """
-    cart, session_token = get_cart(request)
-    # Optimizar consultas con select_related para incluir productos y categorías
-    cart = Cart.objects.select_related('user').prefetch_related(
-        'items__product__category',
-        'items__product__images'
-    ).get(id=cart.id)
     
-    # ✅ OPTIMIZACIÓN: Actualizar precios de items en batch con bulk_update
-    # en lugar de múltiples save() individuales
-    with transaction.atomic():
-        items_to_update = []
-        for item in cart.items.all():
-            if item.product:
-                # Recalcular precio final del producto
-                new_unit_price = item.product.final_price
-                # Solo actualizar si el precio cambió (para evitar updates innecesarios)
-                if item.unit_price != new_unit_price:
-                    item.unit_price = new_unit_price
-                    # Recalcular total_price (se hace automáticamente en save, pero lo hacemos explícito)
-                    item.total_price = item.unit_price * item.quantity
-                    items_to_update.append(item)
-        
-        # Actualizar todos los items que cambiaron en una sola operación
-        if items_to_update:
+    ✅ OPTIMIZACIÓN: Reducir tiempo bajo lock moviendo lógica no crítica fuera de transaction.atomic()
+    La actualización de precios NO requiere transacción atómica estricta porque:
+    - Es idempotente (múltiples actualizaciones dan el mismo resultado)
+    - No hay riesgo de inconsistencia si falla (solo afecta precios mostrados)
+    - El lock solo es necesario para evitar updates concurrentes del mismo item
+    """
+    import time
+    import logging
+    
+    logger = logging.getLogger('performance')
+    start_time = time.time()
+    
+    # ✅ OPTIMIZACIÓN: Usar get_cart_optimized para evitar recarga innecesaria
+    cart, session_token = get_cart_optimized(request)
+    
+    # ✅ OPTIMIZACIÓN: Actualizar precios FUERA de transaction.atomic()
+    # Solo usar atomic si realmente hay items a actualizar (reducir tiempo de lock)
+    items_to_update = []
+    for item in cart.items.all():
+        if item.product:
+            # Recalcular precio final del producto (property, no query)
+            new_unit_price = item.product.final_price
+            # Solo actualizar si el precio cambió (para evitar updates innecesarios)
+            if item.unit_price != new_unit_price:
+                item.unit_price = new_unit_price
+                item.total_price = item.unit_price * item.quantity
+                items_to_update.append(item)
+    
+    # ✅ OPTIMIZACIÓN: Solo usar transaction.atomic() si hay items a actualizar
+    # Esto reduce el tiempo bajo lock cuando no hay cambios de precio
+    if items_to_update:
+        # Lock solo para el bulk_update (operación crítica)
+        with transaction.atomic():
             CartItem.objects.bulk_update(items_to_update, ['unit_price', 'total_price'])
     
     serializer = CartSerializer(cart)
@@ -136,6 +204,17 @@ def view_cart(request):
     
     if session_token:
         response['X-Session-Token'] = session_token
+    
+    # ✅ OPTIMIZACIÓN: Logging de performance (solo en desarrollo o si tarda >500ms)
+    duration = time.time() - start_time
+    if duration > 0.5 or settings.DEBUG:
+        from django.db import connection
+        queries_count = len(connection.queries)
+        queries_time = sum(float(q['time']) for q in connection.queries)
+        logger.info(
+            f"view_cart: {duration:.3f}s total, {queries_count} queries, {queries_time:.3f}s queries, "
+            f"items={len(cart.items.all())}, updates={len(items_to_update)}"
+        )
     
     return response
 

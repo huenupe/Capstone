@@ -17,7 +17,6 @@ const ProductDetail = () => {
   const [loading, setLoading] = useState(true)
   const [quantity, setQuantity] = useState(1)
   const [addingToCart, setAddingToCart] = useState(false)
-  const { setCart } = useCartStore()
   const toast = useToast()
   const toastRef = useRef(toast)
 
@@ -49,30 +48,27 @@ const ProductDetail = () => {
     setAddingToCart(true)
     
     try {
-      // ✅ CORRECCIÓN: Esperar a que se agregue exitosamente antes de mostrar toast
+      // ✅ Enviar cantidad exacta al backend (sin límites artificiales)
       await cartService.addToCart({
         product_id: product.id,
-        quantity,
+        quantity, // Usar la cantidad seleccionada directamente
       })
-
-      // Refresh cart y mostrar toast solo después de éxito
-      try {
-        const cartData = await cartService.getCart()
-        setCart(cartData)
-        // Mostrar toast solo después de que se agregó exitosamente
-        toast.success('Producto agregado al carrito')
-      } catch (err) {
-        console.error('Error refreshing cart:', err)
-        // Aún así mostrar éxito si la adición fue exitosa
-        toast.success('Producto agregado al carrito')
-      }
+      
+      // ✅ MEJORA: Recargar carrito completo desde backend
+      // addToCart() solo devuelve { message, cart_id }, no items
+      const { fetchCart } = useCartStore.getState()
+      await fetchCart()
+      
+      // Mostrar toast de éxito
+      toast.success('Producto agregado al carrito')
     } catch (error) {
-      // Si falla, mostrar error y recargar carrito para sincronizar
-      toast.error(error.response?.data?.error || 'Error al agregar al carrito')
       console.error('Error adding to cart:', error)
+      toast.error(error.response?.data?.error || 'Error al agregar al carrito')
+      
+      // Recargar carrito para sincronizar con servidor en caso de error
       try {
-        const cartData = await cartService.getCart()
-        setCart(cartData)
+        const { fetchCart } = useCartStore.getState()
+        await fetchCart()
       } catch (err) {
         console.error('Error refreshing cart after error:', err)
       }

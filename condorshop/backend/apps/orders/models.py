@@ -1,7 +1,7 @@
 from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator
-from apps.products.models import Product, Category
+from apps.products.models import Product
 
 
 class OrderStatus(models.Model):
@@ -141,8 +141,13 @@ class OrderItem(models.Model):
         ]
 
     def __str__(self):
-        product_name = self.price_snapshot.product_name if self.price_snapshot else (self.product.name if self.product else 'Producto eliminado')
-        return f"{self.quantity}x {product_name} - Pedido {self.order.id}"
+        product_name = (
+            self.price_snapshot.product_name
+            if self.price_snapshot
+            else (self.product.name if self.product else 'Producto eliminado')
+        )
+        order_id = self.order_id or 'sin pedido'
+        return f"{self.quantity}x {product_name} - Pedido {order_id}"
 
 
 class OrderStatusHistory(models.Model):
@@ -322,7 +327,8 @@ class Payment(models.Model):
     )
     # REMOVIDO: amount - ahora se obtiene de la transacción exitosa
     currency = models.CharField(max_length=10, default='CLP', db_column='currency', verbose_name='Moneda')
-    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el')
+    # ✅ OPTIMIZACIÓN ADMIN: Índice en created_at para mejorar filtros/ordenación en admin
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at', verbose_name='Creado el', db_index=True)
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at', verbose_name='Actualizado el')
 
     class Meta:
@@ -332,10 +338,14 @@ class Payment(models.Model):
         indexes = [
             models.Index(fields=['order'], name='idx_payment_order'),
             models.Index(fields=['status'], name='idx_payment_status'),
+            # ✅ OPTIMIZACIÓN ADMIN: Índice compuesto para filtros comunes (status + created_at)
+            models.Index(fields=['status', '-created_at'], name='idx_payment_status_created'),
         ]
 
     def __str__(self):
-        return f"Pago {self.id} - Pedido {self.order.id} - {self.status.code}"
+        order_id = self.order_id or 'sin pedido'
+        status_code = self.status.code if self.status_id else 'sin estado'
+        return f"Pago {self.id} - Pedido {order_id} - {status_code}"
     
     @property
     def amount(self):
@@ -344,15 +354,37 @@ class Payment(models.Model):
         Retorna None si no hay transacciones.
         NOTA: PaymentTransaction ahora se relaciona con Order, no con Payment.
         Accedemos a través de order.payment_transactions.
+        
+        ✅ OPTIMIZACIÓN ADMIN: Usa prefetched_payment_transactions si está disponible
+        para evitar queries adicionales en el admin.
         """
-        # Buscar transacción exitosa primero (a través de Order)
-        successful_tx = self.order.payment_transactions.filter(status='approved').first()
+        if not self.order:
+            return None
+        
+        # ✅ OPTIMIZACIÓN: Usar prefetch si está disponible (evita queries adicionales)
+        if hasattr(self.order, 'prefetched_payment_transactions'):
+            txs = self.order.prefetched_payment_transactions
+        else:
+            txs = list(self.order.payment_transactions.all())
+        
+        if not txs:
+            return None
+        
+        # Buscar transacción exitosa primero
+        successful_tx = next((tx for tx in txs if tx.status == 'approved'), None)
         if successful_tx:
             return successful_tx.amount
         
-        # Si no hay exitosa, retornar la más reciente
-        latest_tx = self.order.payment_transactions.order_by('-created_at').first()
-        return latest_tx.amount if latest_tx else None
+        # Si no hay exitosa, retornar la más reciente (ordenar por created_at descendente)
+        txs_with_date = [tx for tx in txs if tx.created_at is not None]
+        if txs_with_date:
+            latest_tx = max(txs_with_date, key=lambda tx: tx.created_at)
+            return latest_tx.amount
+        elif txs:
+            # Si ninguna tiene fecha, retornar la primera disponible
+            return txs[0].amount
+        
+        return None
     
     @property
     def current_transaction(self):
@@ -360,11 +392,37 @@ class Payment(models.Model):
         Obtener la transacción actual (exitosa o la más reciente).
         NOTA: PaymentTransaction ahora se relaciona con Order, no con Payment.
         Accedemos a través de order.payment_transactions.
+        
+        ✅ OPTIMIZACIÓN ADMIN: Usa prefetched_payment_transactions si está disponible
+        para evitar queries adicionales en el admin.
         """
-        successful_tx = self.order.payment_transactions.filter(status='approved').first()
+        if not self.order:
+            return None
+        
+        # ✅ OPTIMIZACIÓN: Usar prefetch si está disponible (evita queries adicionales)
+        if hasattr(self.order, 'prefetched_payment_transactions'):
+            txs = self.order.prefetched_payment_transactions
+        else:
+            txs = list(self.order.payment_transactions.all())
+        
+        if not txs:
+            return None
+        
+        # Buscar transacción exitosa primero
+        successful_tx = next((tx for tx in txs if tx.status == 'approved'), None)
         if successful_tx:
             return successful_tx
-        return self.order.payment_transactions.order_by('-created_at').first()
+        
+        # Si no hay exitosa, retornar la más reciente (ordenar por created_at descendente)
+        txs_with_date = [tx for tx in txs if tx.created_at is not None]
+        if txs_with_date:
+            latest_tx = max(txs_with_date, key=lambda tx: tx.created_at)
+            return latest_tx
+        elif txs:
+            # Si ninguna tiene fecha, retornar la primera disponible
+            return txs[0]
+        
+        return None
     
     def get_amount(self):
         """
@@ -409,19 +467,23 @@ class PaymentTransaction(models.Model):
     )
     
     # Información del pago
+    # ✅ OPTIMIZACIÓN ADMIN: Índice en payment_method para mejorar filtros en admin
     payment_method = models.CharField(
         max_length=20,
         choices=PAYMENT_METHOD_CHOICES,
         default='webpay',
         db_column='payment_method',
-        verbose_name='Método de pago'
+        verbose_name='Método de pago',
+        db_index=True
     )
+    # ✅ OPTIMIZACIÓN ADMIN: Índice en status para mejorar filtros en admin
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
         default='pending',
         db_column='status',
-        verbose_name='Estado'
+        verbose_name='Estado',
+        db_index=True
     )
     amount = models.PositiveIntegerField(db_column='amount', verbose_name='Monto')
     currency = models.CharField(max_length=3, default='CLP', db_column='currency', verbose_name='Moneda')
@@ -494,6 +556,9 @@ class PaymentTransaction(models.Model):
             models.Index(fields=['status'], name='idx_payment_tx_status'),
             models.Index(fields=['webpay_token'], name='idx_payment_webpay_token'),
             models.Index(fields=['created_at'], name='idx_payment_tx_created'),
+            # ✅ OPTIMIZACIÓN ADMIN: Índices compuestos para filtros comunes en admin
+            models.Index(fields=['payment_method', '-created_at'], name='idx_payment_tx_method_created'),
+            models.Index(fields=['status', '-created_at'], name='idx_payment_tx_status_created'),
         ]
         constraints = [
             # Constraint único en webpay_buy_order para prevenir duplicados (Error 21)

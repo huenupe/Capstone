@@ -30,6 +30,9 @@ export const useAuthStore = create(
       login: (user, token) => {
         try {
           if (!user || !token) {
+            if (import.meta.env.DEV) {
+              console.warn('[authStore] Login: user o token faltante')
+            }
             return
           }
 
@@ -40,13 +43,64 @@ export const useAuthStore = create(
             role: user?.role || null,
             isAuthenticated: true,
           })
+          
+          if (import.meta.env.DEV) {
+            console.log('[authStore] Login exitoso para:', user?.email || user?.id)
+          }
         } catch (error) {
-          // Ignorar errores de login
+          if (import.meta.env.DEV) {
+            console.error('[authStore] Error en login:', error)
+          }
         }
       },
 
       logout: () => {
         try {
+          // ✅ MEJORA: NO limpiar carrito - debe funcionar como guest después de logout
+          // El carrito seguirá funcionando con session_token
+          
+          // ✅ MEJORA: Limpiar órdenes al hacer logout usando import() dinámico (compatible con Vite)
+          // Usamos import() en lugar de require() porque Vite/React no soporta require en el navegador
+          import('../store/ordersSlice')
+            .then(({ useOrdersStore }) => {
+              if (useOrdersStore && typeof useOrdersStore.getState === 'function') {
+                const clearOrders = useOrdersStore.getState().clearOrders
+                if (typeof clearOrders === 'function') {
+                  clearOrders()
+                  if (import.meta.env.DEV) {
+                    console.log('[authStore] Órdenes limpiadas correctamente')
+                  }
+                }
+              }
+            })
+            .catch((err) => {
+              // No crítico si ordersSlice no existe o falla la importación
+              if (import.meta.env.DEV) {
+                console.log('[authStore] No se pudo limpiar órdenes (no crítico):', err.message)
+              }
+            })
+          
+          // ✅ CRÍTICO: Eliminar token y actualizar estado SIEMPRE
+          authToken.remove()
+          
+          // ✅ CRÍTICO: Actualizar estado SIEMPRE (no esperar a la limpieza de órdenes)
+          set({
+            token: null,
+            user: null,
+            role: null,
+            isAuthenticated: false,
+          })
+          
+          if (import.meta.env.DEV) {
+            console.log('[authStore] Logout exitoso')
+          }
+        } catch (error) {
+          // ✅ MEJORA: Loguear errores en desarrollo
+          if (import.meta.env.DEV) {
+            console.error('[authStore] Error en logout:', error)
+          }
+          
+          // ✅ CRÍTICO: Asegurar que el estado se actualice incluso si hay errores
           authToken.remove()
           set({
             token: null,
@@ -54,14 +108,15 @@ export const useAuthStore = create(
             role: null,
             isAuthenticated: false,
           })
-        } catch (error) {
-          // Ignorar errores de logout
         }
       },
 
       updateUser: (user) => {
         try {
           if (!user || typeof user !== 'object') {
+            if (import.meta.env.DEV) {
+              console.warn('[authStore] updateUser: user inválido')
+            }
             return
           }
 
@@ -70,7 +125,9 @@ export const useAuthStore = create(
             role: user?.role || null,
           })
         } catch (error) {
-          // Ignorar errores de actualización
+          if (import.meta.env.DEV) {
+            console.error('[authStore] Error en updateUser:', error)
+          }
         }
       },
 
@@ -79,9 +136,18 @@ export const useAuthStore = create(
           const token = authToken.get()
           if (token && typeof token === 'string') {
             set({ token, isAuthenticated: true })
+            if (import.meta.env.DEV) {
+              console.log('[authStore] Inicializado con token existente')
+            }
+          } else {
+            if (import.meta.env.DEV) {
+              console.log('[authStore] Inicializado sin token (usuario no autenticado)')
+            }
           }
         } catch (error) {
-          // Ignorar errores de inicialización
+          if (import.meta.env.DEV) {
+            console.error('[authStore] Error en initialize:', error)
+          }
         }
       },
     }),
