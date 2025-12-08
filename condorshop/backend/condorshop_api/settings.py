@@ -93,22 +93,27 @@ TEMPLATES = [
 WSGI_APPLICATION = 'condorshop_api.wsgi.application'
 
 # Database
+db_host = env('DB_HOST', default='localhost')
+db_options = {
+    'connect_timeout': 10,  # Timeout de conexión en segundos
+    'options': '-c statement_timeout=30000',  # Timeout de queries: 30 segundos
+}
+
+# Solo requerir SSL si no es localhost (Supabase u otro servicio remoto)
+if db_host not in ['localhost', '127.0.0.1']:
+    db_options['sslmode'] = 'require'
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': env('DB_NAME'),
         'USER': env('DB_USER'),
         'PASSWORD': env('DB_PASSWORD'),
-        'HOST': env('DB_HOST', default='localhost'),
+        'HOST': db_host,
         'PORT': env('DB_PORT', default='5432'),
         'ATOMIC_REQUESTS': True,
-        # Optimizaciones para base de datos remota (Supabase)
         'CONN_MAX_AGE': 600,  # Reutilizar conexiones por 10 minutos (reduce latencia)
-        'OPTIONS': {
-            'connect_timeout': 10,  # Timeout de conexión en segundos
-            'options': '-c statement_timeout=30000',  # Timeout de queries: 30 segundos
-            'sslmode': 'require',  # Requerido para Supabase (conexiones SSL)
-        },
+        'OPTIONS': db_options,
     }
 }
 
