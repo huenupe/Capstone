@@ -1,6 +1,9 @@
 CondorShop - E-commerce
+
 📋 Resumen del Proyecto
+
 CondorShop es una plataforma de comercio electrónico desarrollada como proyecto de título (Capstone) que implementa un ciclo completo de tienda online con integración de pagos mediante Transbank Webpay Plus.
+
 Stack Tecnológico
 
 Backend: Django 5.2.8 + Django REST Framework 3.16.1
