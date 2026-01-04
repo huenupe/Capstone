@@ -48,13 +48,21 @@ El proyecto cuenta con documentación exhaustiva que incluye:
 
 Características Principales
 ✅ Catálogo con búsqueda, filtros y paginación
+
 ✅ Carrito persistente (usuarios registrados e invitados)
+
 ✅ Gestión transaccional de stock
+
 ✅ Integración completa con Transbank Webpay Plus
+
 ✅ Historial automático de precios
+
 ✅ Sistema de auditoría
+
 ✅ Panel administrativo con Django Admin
+
 ✅ Rate limiting y seguridad (CORS, CSRF, XSS)
+
 ✅ Testing unitario completo
 
 Integrantes: Benjamín Huenupe (PO/Backend-DevOps) | Juan Rodríguez (SM/Full-stack)
